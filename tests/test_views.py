@@ -158,11 +158,11 @@ def assert_bookmark(bookmark, query, tags=None):
 @pytest.mark.gui
 @pytest.mark.slow
 @pytest.mark.parametrize('exists, uri, tab, args', [
-    (False, '/bookmark/new/', 'Create', ['link', 'title', 'description', 'popup']),
-    (True, '/bookmark/edit/', 'Edit', ['id', 'popup']),
+    (False, '/bookmark/new/', 'Create', ['link', 'title', 'description', 'tags', 'fetch', 'popup']),
+    (True, '/bookmark/edit/', 'Edit', ['id', 'title', 'description', 'tags', 'fetch', 'popup']),
 ])
 def test_bookmarklet_view(bukudb, client, exists, uri, tab, args):
-    query = {'url': 'http://example.com', 'title': 'Sample site', 'description': 'Foo bar baz'}
+    query = {'url': 'http://example.com', 'title': 'Sample site', 'description': 'Foo bar baz', 'tags': 'foo, bar, baz', 'fetch': ''}
     if exists:
         _add_rec(bukudb, query['url'])
 
@@ -171,6 +171,41 @@ def test_bookmarklet_view(bukudb, client, exists, uri, tab, args):
     assert dom.xpath(f'//ul{xpath_cls("nav nav-tabs")}//a{xpath_cls("nav-link active")}/text()') == [tab]
     assert dom.xpath('//input[@name="link"]/@value') == [query['url']]
     assert bool(dom.xpath('//input[@name="id"]')) == exists
+    assert dom.xpath('//input[@name="title"]/@value') == [query['title']]
+    [desc] = dom.xpath('//textarea[@name="description"]/text()')
+    assert desc.strip() == query['description']
+    assert dom.xpath('//input[@name="tags"]/@value') == [query['tags']]
+
+
+@pytest.mark.gui
+@pytest.mark.slow
+@pytest.mark.parametrize('exists', [False, True])
+def test_bookmarklet_submit(bukudb, client, exists):
+    query = {'url': 'http://example.com', 'title': 'Sample site', 'description': 'Foo bar baz', 'tags': 'foo, bar, baz', 'fetch': ''}
+    if exists:
+        _add_rec(bukudb, query['url'], title_in='Old title', desc='Old description')
+
+    # Step 1: GET bookmarklet — verify pre-fill
+    response = client.get('/bookmarklet', query_string=query, follow_redirects=True)
+    uri = '/bookmark/edit/' if exists else '/bookmark/new/'
+    dom = assert_response(response, uri)
+    assert dom.xpath('//input[@name="link"]/@value') == [query['url']]
+    assert dom.xpath('//input[@name="title"]/@value') == [query['title']]
+    [desc] = dom.xpath('//textarea[@name="description"]/text()')
+    assert desc.strip() == query['description']
+    assert dom.xpath('//input[@name="tags"]/@value') == [query['tags']]
+
+    # Step 2: POST the form — verify DB state
+    post_data = {'link': query['url'], 'title': query['title'],
+                 'description': query['description'], 'tags': query['tags'], 'fetch': ''}
+    response = client.post(uri, query_string={'id': 1} if exists else {},
+                           data=post_data, follow_redirects=True)
+    dom = assert_response(response, '/bookmark/')
+    assert_success_alert(dom, edit=exists)
+
+    # Step 3: Verify the bookmark in DB
+    [bookmark] = bukudb.get_rec_all()
+    assert_bookmark(bookmark, post_data, tags=',bar,baz,foo,')
 
 
 @pytest.mark.gui

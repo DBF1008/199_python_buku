@@ -220,6 +220,16 @@ class BookmarkModelView(BaseModelView, ApplyFiltersMixin):
             form.fetch.data = request.args.get('fetch', request.form.get('fetch', app_param('AUTOFETCH', True)))
         return form
 
+    def edit_form(self, obj=None):
+        form = super().edit_form(obj)
+        if not form.data.get('csrf_token'):  # don't override POST data with URL arguments
+            form.url.data = request.args.get('link', form.url.data)
+            form.title.data = request.args.get('title', form.title.data)
+            form.description.data = request.args.get('description', form.description.data)
+            form.tags.data = request.args.get('tags', form.tags.data)
+            form.fetch.data = request.args.get('fetch', request.form.get('fetch', app_param('AUTOFETCH', True)))
+        return form
+
     def create_model(self, form):
         try:
             model = types.SimpleNamespace(id=None, url=None, title=None, tags=None, description=None, fetch=None)
