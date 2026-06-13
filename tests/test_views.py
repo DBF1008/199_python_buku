@@ -123,6 +123,34 @@ def test_bmv_create_form(bmv_instance, url, backlink, app):
         assert form.url.data == url
 
 
+@pytest.mark.parametrize('existing, args, expected', [
+    # empty existing record -> filled from incoming args; tags = deduplicated sorted union
+    (('', '', ''),
+     {'title': 'New title', 'description': 'New desc', 'tags': 'foo, bar'},
+     ('New title', 'bar, foo', 'New desc', False)),
+    # non-empty existing title/description preserved; tags still merged
+    (('Old title', 'bar,baz', 'Old desc'),
+     {'title': 'New title', 'description': 'New desc', 'tags': 'foo, bar'},
+     ('Old title', 'bar, baz, foo', 'Old desc', False)),
+    # fetch flag is carried into the form; other fields left untouched
+    (('', '', ''),
+     {'fetch': 'True'},
+     ('', '', '', True)),
+])
+def test_bmv_edit_form(bmv_instance, app, existing, args, expected):
+    title, tags, desc = existing
+    _add_rec(bmv_instance.bukudb, 'http://example.com', title, tags, desc)
+    exp_title, exp_tags, exp_desc, exp_fetch = expected
+    with app.test_request_context():
+        request.args = MultiDict(args)
+        obj = bmv_instance.get_one(1)
+        form = bmv_instance.edit_form(obj)
+        assert (form.title.data or '') == exp_title
+        assert (form.description.data or '') == exp_desc
+        assert (form.tags.data or '') == exp_tags
+        assert bool(form.fetch.data) == exp_fetch
+
+
 #
 # -= functional tests =-
 #
@@ -159,7 +187,7 @@ def assert_bookmark(bookmark, query, tags=None):
 @pytest.mark.slow
 @pytest.mark.parametrize('exists, uri, tab, args', [
     (False, '/bookmark/new/', 'Create', ['link', 'title', 'description', 'popup']),
-    (True, '/bookmark/edit/', 'Edit', ['id', 'popup']),
+    (True, '/bookmark/edit/', 'Edit', ['id', 'title', 'description', 'popup']),
 ])
 def test_bookmarklet_view(bukudb, client, exists, uri, tab, args):
     query = {'url': 'http://example.com', 'title': 'Sample site', 'description': 'Foo bar baz'}
@@ -170,6 +198,7 @@ def test_bookmarklet_view(bukudb, client, exists, uri, tab, args):
     dom = assert_response(response, uri, argnames=args)
     assert dom.xpath(f'//ul{xpath_cls("nav nav-tabs")}//a{xpath_cls("nav-link active")}/text()') == [tab]
     assert dom.xpath('//input[@name="link"]/@value') == [query['url']]
+    assert dom.xpath('//input[@name="title"]/@value') == [query['title']]
     assert bool(dom.xpath('//input[@name="id"]')) == exists
 
 
@@ -199,6 +228,29 @@ def test_create_and_fetch(bukudb, monkeypatch, client, fetch, title, desc):
         'title': (title or _title) if fetch or fetch is None else title,  # defaults to True
         'description': (desc or _desc) if fetch or fetch is None else desc,
     })
+
+
+@pytest.mark.gui
+@pytest.mark.slow
+@pytest.mark.parametrize('fetch, fetched', [
+    (True, True),
+    (False, False),
+    (None, False),
+])
+def test_update_and_fetch(bukudb, client, fetch, fetched):
+    _add_rec(bukudb, 'http://example.com')  # bare record: empty title/description
+    _title, _desc = 'Fetched title', 'Fetched description'
+    query = {'link': 'http://example.com', 'title': '', 'description': '', 'tags': ''}
+    if fetch is not None:
+        query['fetch'] = 'on' if fetch else ''
+
+    with mock_fetch(title=_title, desc=_desc):
+        response = client.post('/bookmark/edit/', query_string={'id': 1}, data=query, follow_redirects=True)
+    dom = assert_response(response, '/bookmark/')
+    assert_success_alert(dom, edit=True)
+    [bookmark] = bukudb.get_rec_all()
+    assert bookmark.title == (_title if fetched else '')
+    assert bookmark.desc == (_desc if fetched else '')
 
 
 @pytest.mark.gui

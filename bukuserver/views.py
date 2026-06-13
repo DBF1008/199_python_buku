@@ -220,6 +220,20 @@ class BookmarkModelView(BaseModelView, ApplyFiltersMixin):
             form.fetch.data = request.args.get('fetch', request.form.get('fetch', app_param('AUTOFETCH', True)))
         return form
 
+    def edit_form(self, obj=None):
+        form = super().edit_form(obj)
+        if not form.data.get('csrf_token'):  # don't override POST data with URL arguments
+            if not (form.title.data or '').strip():
+                form.title.data = request.args.get('title', form.title.data)
+            if not (form.description.data or '').strip():
+                form.description.data = request.args.get('description', form.description.data)
+            tags = request.args.get('tags')
+            if tags:  # merge incoming tags with existing ones (deduplicated, sorted union)
+                merged = buku.parse_tags([(form.tags.data or '') + buku.DELIM + tags])
+                form.tags.data = merged.strip(buku.DELIM).replace(',', ', ')
+            form.fetch.data = request.args.get('fetch', request.form.get('fetch', False))
+        return form
+
     def create_model(self, form):
         try:
             model = types.SimpleNamespace(id=None, url=None, title=None, tags=None, description=None, fetch=None)
@@ -420,10 +434,12 @@ class BookmarkModelView(BaseModelView, ApplyFiltersMixin):
         try:
             form.populate_obj(model)
             self._on_model_change(form, model, False)
+            fetch = form.fetch.data
+            title_in = None if fetch and not (model.title or '').strip() else model.title
             res = self.bukudb.update_rec(
                 model.id,
                 url=model.url,
-                title_in=model.title,
+                title_in=title_in,
                 tags_in=buku.parse_tags([model.tags]),
                 desc=model.description,
             )

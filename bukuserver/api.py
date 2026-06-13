@@ -330,6 +330,7 @@ def bookmarklet_redirect():
 
     with get_bukudb() as bukudb:
         rec_id = bukudb.get_rec_id(url)
-        goto = (url_for('bookmark.edit_view', id=rec_id, popup=True) if rec_id else
-                url_for('bookmark.create_view', link=url, title=title, description=description, tags=tags, fetch=fetch, popup=True))
+        kwargs = dict(title=title, description=description, tags=tags, fetch=fetch, popup=True)
+        goto = (url_for('bookmark.edit_view', id=rec_id, **kwargs) if rec_id else
+                url_for('bookmark.create_view', link=url, **kwargs))
         return redirect(goto)

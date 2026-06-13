@@ -26,6 +26,7 @@
   {{ buku.limit_navigation_if_popup() }}
   {{ buku.script('bookmark.js') }}
   <script>$('.submit-row').append($('.delete-form'))</script>
+  {{ buku.fetch_checkbox(form.fetch.data) }}
   {{ buku.horizontal_form(excluding_popups=True) }}
   {{ buku.focus() }}
   {{ buku.link_saved() }}
