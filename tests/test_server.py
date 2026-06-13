@@ -288,6 +288,92 @@ def test_api_bookmark_search(client):
     assert_response(rd, Response.SUCCESS, {'bookmarks': []})
 
 
+def test_api_bookmark_search_stag(client):
+    """Test GET /api/bookmarks/search with stag tag filtering."""
+    # Create bookmarks with different tags
+    client.post('/api/bookmarks', json={'url': 'http://a.com', 'title': 'Alpha site', 'tags': ['python', 'web'], 'fetch': False})
+    client.post('/api/bookmarks', json={'url': 'http://b.com', 'title': 'Beta site', 'tags': ['java', 'web'], 'fetch': False})
+    client.post('/api/bookmarks', json={'url': 'http://c.com', 'title': 'Gamma tool', 'tags': ['python', 'cli'], 'fetch': False})
+
+    # stag with comma = OR: match any tag
+    rd = client.get('/api/bookmarks/search', query_string={'keywords': ['site'], 'stag': ['python,java']})
+    data = rd.get_json()
+    assert data['status'] == 0
+    urls = {b['url'] for b in data['bookmarks']}
+    assert urls == {'http://a.com', 'http://b.com'}
+
+    # stag with plus = AND: match all tags
+    rd = client.get('/api/bookmarks/search', query_string={'keywords': ['site'], 'stag': ['python + web']})
+    data = rd.get_json()
+    assert data['status'] == 0
+    urls = {b['url'] for b in data['bookmarks']}
+    assert urls == {'http://a.com'}
+
+    # stag narrows keyword search: 'tool' keyword with python tag
+    rd = client.get('/api/bookmarks/search', query_string={'keywords': ['tool'], 'stag': ['python']})
+    data = rd.get_json()
+    assert data['status'] == 0
+    assert len(data['bookmarks']) == 1
+    assert data['bookmarks'][0]['url'] == 'http://c.com'
+
+    # stag with no matching keyword results -> empty
+    rd = client.get('/api/bookmarks/search', query_string={'keywords': ['nonexistent'], 'stag': ['python']})
+    assert_response(rd, Response.SUCCESS, {'bookmarks': []})
+
+
+def test_api_bookmark_search_without(client):
+    """Test GET /api/bookmarks/search with without keyword exclusion."""
+    client.post('/api/bookmarks', json={'url': 'http://a.com', 'title': 'Python tutorial', 'tags': ['dev'], 'fetch': False})
+    client.post('/api/bookmarks', json={'url': 'http://b.com', 'title': 'Python framework', 'tags': ['dev'], 'fetch': False})
+    client.post('/api/bookmarks', json={'url': 'http://c.com', 'title': 'Java tutorial', 'tags': ['dev'], 'fetch': False})
+
+    # without excludes bookmarks matching the keyword
+    rd = client.get('/api/bookmarks/search', query_string={'keywords': ['dev'], 'without': ['tutorial']})
+    data = rd.get_json()
+    assert data['status'] == 0
+    urls = {b['url'] for b in data['bookmarks']}
+    assert urls == {'http://b.com'}
+
+    # without with multiple keywords excludes all matching
+    rd = client.get('/api/bookmarks/search', query_string={'keywords': ['dev'], 'without': ['tutorial', 'framework']})
+    data = rd.get_json()
+    assert data['status'] == 0
+    assert data['bookmarks'] == []
+
+
+def test_api_bookmark_search_stag_and_without(client):
+    """Test GET /api/bookmarks/search with both stag and without combined."""
+    client.post('/api/bookmarks', json={'url': 'http://a.com', 'title': 'Django tutorial', 'tags': ['python', 'web'], 'fetch': False})
+    client.post('/api/bookmarks', json={'url': 'http://b.com', 'title': 'Flask framework', 'tags': ['python', 'web'], 'fetch': False})
+    client.post('/api/bookmarks', json={'url': 'http://c.com', 'title': 'Spring tutorial', 'tags': ['java', 'web'], 'fetch': False})
+
+    # keyword + stag (narrow to python) + without (exclude tutorial)
+    rd = client.get('/api/bookmarks/search', query_string={
+        'keywords': ['web'], 'stag': ['python'], 'without': ['tutorial']
+    })
+    data = rd.get_json()
+    assert data['status'] == 0
+    assert len(data['bookmarks']) == 1
+    assert data['bookmarks'][0]['url'] == 'http://b.com'
+
+
+def test_api_bookmark_search_delete_with_stag_and_without(client):
+    """Test DELETE /api/bookmarks/search with stag and without parameters."""
+    client.post('/api/bookmarks', json={'url': 'http://a.com', 'title': 'Django tutorial', 'tags': ['python', 'web'], 'fetch': False})
+    client.post('/api/bookmarks', json={'url': 'http://b.com', 'title': 'Flask framework', 'tags': ['python', 'web'], 'fetch': False})
+    client.post('/api/bookmarks', json={'url': 'http://c.com', 'title': 'Spring tutorial', 'tags': ['java', 'web'], 'fetch': False})
+
+    # DELETE with stag: only delete python-tagged bookmarks matching 'web'
+    rd = client.delete('/api/bookmarks/search', data={'keywords': ['web'], 'stag': ['python'], 'without': ['tutorial']})
+    assert_response(rd, Response.SUCCESS, {'deleted': 1})
+
+    # Verify: only Django tutorial (deleted) removed, Flask and Spring remain
+    rd = client.get('/api/bookmarks')
+    data = rd.get_json()
+    urls = {b['url'] for b in data['bookmarks']}
+    assert urls == {'http://a.com', 'http://c.com'}
+
+
 @pytest.mark.parametrize('env_val, exp_val', [
     ['true', True],
     ['false', False],

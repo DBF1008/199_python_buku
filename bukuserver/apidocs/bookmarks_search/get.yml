@@ -55,6 +55,28 @@ parameters:
     example: ["global substring", ".title substring", ":url substring", ">description substring", "#partial,tags:", "#,exact,tags", "*another global substring"]
     description: "A set of terms to search for."
 
+  - name: stag
+    in: query
+    collectionFormat: multi
+    type: array
+    items:
+      type: string
+    example: ["tag1,tag2"]
+    description: |-
+      Filter search results by tags. Each element is a tag filter string:
+      * Tags delimited with `,` match entries containing **any** of the tags (OR).
+      * Tags delimited with `+` match entries containing **all** of the tags (AND).
+      Applied after keyword search to narrow results.
+
+  - name: without
+    in: query
+    collectionFormat: multi
+    type: array
+    items:
+      type: string
+    example: ["excluded keyword"]
+    description: "Keywords to exclude from results. Bookmarks matching any of these keywords will be removed from the search results."
+
 responses:
   200:
     description: A list of bookmarks
