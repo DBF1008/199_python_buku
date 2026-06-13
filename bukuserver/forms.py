@@ -3,8 +3,8 @@
 import re
 from flask_wtf import FlaskForm
 from wtforms import Form
-from wtforms.fields import BooleanField, FieldList, URLField, StringField, TextAreaField, HiddenField, SelectMultipleField
-from wtforms.validators import DataRequired, InputRequired, Length, Regexp, StopValidation
+from wtforms.fields import BooleanField, FieldList, IntegerField, URLField, StringField, TextAreaField, HiddenField, SelectMultipleField
+from wtforms.validators import DataRequired, InputRequired, Length, NumberRange, Optional, Regexp, StopValidation
 from buku import DELIM, taglist_str
 from bukuserver import _, _l, LazyString
 
@@ -129,6 +129,11 @@ class ApiBookmarkRangeEditForm(ApiBookmarkEditForm):
         return [self.url.data, self.title.data, self.description.data, self.tags_in]
 
 
+class ApiBookmarksForm(Form):
+    order = ValueList(item_validators=[is_string])
+    random = IntegerField(validators=[Optional(), NumberRange(min=1)])
+
+
 class ApiBookmarkSearchForm(Form):
     keywords = ValueList(validators=[DataRequired()], item_validators=[is_string])
     all_keywords = BooleanField(filters=[_parse_bool])
@@ -136,6 +141,7 @@ class ApiBookmarkSearchForm(Form):
     regex = BooleanField(filters=[_parse_bool])
     markers = BooleanField(filters=[_parse_bool])
     order = ValueList(item_validators=[is_string])
+    random = IntegerField(validators=[Optional(), NumberRange(min=1)])
 
 class ApiBookmarksReorderForm(Form):
     order = ValueList(validators=[DataRequired()], item_validators=[is_string])

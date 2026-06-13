@@ -1,4 +1,5 @@
 import os
+from unittest import mock
 from typing import Any, Dict
 from http import HTTPStatus
 import pytest
@@ -286,6 +287,131 @@ def test_api_bookmark_search(client):
     assert_response(rd, Response.SUCCESS, {'deleted': 1})
     rd = client.get('/api/bookmarks')
     assert_response(rd, Response.SUCCESS, {'bookmarks': []})
+
+
+def _populate_bookmarks(client, count=5):
+    """Helper to populate the DB with `count` bookmarks for testing."""
+    urls = []
+    for i in range(1, count + 1):
+        url = f'http://example{i}.com'
+        urls.append(url)
+        with mock_fetch(title=f'Title {i}'):
+            client.post('/api/bookmarks', json={'url': url, 'fetch': True})
+    return urls
+
+
+@pytest.mark.parametrize('random_val', [0, -1, -10])
+def test_api_bookmarks_random_invalid(random_val, client):
+    _populate_bookmarks(client, 3)
+    rd = client.get('/api/bookmarks', query_string={'random': random_val})
+    assert_response(rd, Response.INPUT_NOT_VALID,
+                    data={'errors': {'random': ['Number must be at least 1.']}})
+
+
+@pytest.mark.parametrize('random_val', ['abc', '1.5'])
+def test_api_bookmarks_random_bad_type(random_val, client):
+    _populate_bookmarks(client, 3)
+    rd = client.get('/api/bookmarks', query_string={'random': random_val})
+    assert rd.status_code == Response.INPUT_NOT_VALID.status_code
+
+
+def test_api_bookmarks_random_sample(client):
+    _populate_bookmarks(client, 5)
+    with mock.patch('bukuserver.api.random.sample', side_effect=lambda seq, k: list(seq)[:k]):
+        rd = client.get('/api/bookmarks', query_string={'random': 2})
+    assert rd.status_code == Response.SUCCESS.status_code
+    bookmarks = rd.get_json()['bookmarks']
+    assert len(bookmarks) == 2
+
+
+def test_api_bookmarks_random_exceeds_count(client):
+    _populate_bookmarks(client, 3)
+    rd = client.get('/api/bookmarks', query_string={'random': 100})
+    assert rd.status_code == Response.SUCCESS.status_code
+    bookmarks = rd.get_json()['bookmarks']
+    assert len(bookmarks) == 3
+
+
+def test_api_bookmarks_random_empty_db(client):
+    rd = client.get('/api/bookmarks', query_string={'random': 5})
+    assert_response(rd, Response.SUCCESS, {'bookmarks': []})
+
+
+def test_api_bookmarks_random_with_order(client):
+    _populate_bookmarks(client, 5)
+    with mock.patch('bukuserver.api.random.sample', side_effect=lambda seq, k: list(seq)[:k]):
+        rd = client.get('/api/bookmarks', query_string={'random': 3, 'order': ['-index']})
+    assert rd.status_code == Response.SUCCESS.status_code
+    bookmarks = rd.get_json()['bookmarks']
+    assert len(bookmarks) == 3
+    indices = [b['index'] for b in bookmarks]
+    assert indices == sorted(indices, reverse=True)
+
+
+def test_api_bookmarks_random_equals_count(client):
+    _populate_bookmarks(client, 3)
+    rd = client.get('/api/bookmarks', query_string={'random': 3})
+    assert rd.status_code == Response.SUCCESS.status_code
+    bookmarks = rd.get_json()['bookmarks']
+    assert len(bookmarks) == 3
+
+
+@pytest.mark.parametrize('random_val', [0, -1])
+def test_api_search_random_invalid(random_val, client):
+    _populate_bookmarks(client, 3)
+    rd = client.get('/api/bookmarks/search',
+                    query_string={'keywords': ['Title'], 'random': random_val})
+    assert_response(rd, Response.INPUT_NOT_VALID,
+                    data={'errors': {'random': ['Number must be at least 1.']}})
+
+
+def test_api_search_random_sample(client):
+    _populate_bookmarks(client, 5)
+    with mock.patch('bukuserver.api.random.sample', side_effect=lambda seq, k: list(seq)[:k]):
+        rd = client.get('/api/bookmarks/search',
+                        query_string={'keywords': ['Title'], 'random': 2})
+    assert rd.status_code == Response.SUCCESS.status_code
+    bookmarks = rd.get_json()['bookmarks']
+    assert len(bookmarks) == 2
+
+
+def test_api_search_random_exceeds_count(client):
+    _populate_bookmarks(client, 3)
+    rd = client.get('/api/bookmarks/search',
+                    query_string={'keywords': ['Title'], 'random': 100})
+    assert rd.status_code == Response.SUCCESS.status_code
+    bookmarks = rd.get_json()['bookmarks']
+    assert len(bookmarks) == 3
+
+
+def test_api_search_random_empty_results(client):
+    rd = client.get('/api/bookmarks/search',
+                    query_string={'keywords': ['nonexistent'], 'random': 5})
+    assert_response(rd, Response.SUCCESS, {'bookmarks': []})
+
+
+def test_api_search_random_with_order(client):
+    _populate_bookmarks(client, 5)
+    with mock.patch('bukuserver.api.random.sample', side_effect=lambda seq, k: list(seq)[:k]):
+        rd = client.get('/api/bookmarks/search',
+                        query_string={'keywords': ['Title'], 'random': 3, 'order': ['-index']})
+    assert rd.status_code == Response.SUCCESS.status_code
+    bookmarks = rd.get_json()['bookmarks']
+    assert len(bookmarks) == 3
+    indices = [b['index'] for b in bookmarks]
+    assert indices == sorted(indices, reverse=True)
+
+
+def test_api_search_random_with_deep(client):
+    _populate_bookmarks(client, 5)
+    with mock.patch('bukuserver.api.random.sample', side_effect=lambda seq, k: list(seq)[:k]):
+        rd = client.get('/api/bookmarks/search',
+                        query_string={'keywords': ['example'], 'deep': 'true', 'random': 2})
+    assert rd.status_code == Response.SUCCESS.status_code
+    bookmarks = rd.get_json()['bookmarks']
+    assert len(bookmarks) == 2
+    for b in bookmarks:
+        assert 'example' in b['url']
 
 
 @pytest.mark.parametrize('env_val, exp_val', [

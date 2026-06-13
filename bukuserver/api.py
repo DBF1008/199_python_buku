@@ -2,6 +2,7 @@
 # pylint: disable=wrong-import-order, ungrouped-imports
 """Server module."""
 import collections
+import random
 import typing as T
 from contextlib import contextmanager
 
@@ -17,12 +18,12 @@ from buku import BukuDb
 try:
     from . import _
     from response import Response
-    from forms import (TAG_RE, ApiBookmarkCreateForm, ApiBookmarkEditForm, ApiBookmarkRangeEditForm,
+    from forms import (TAG_RE, ApiBookmarksForm, ApiBookmarkCreateForm, ApiBookmarkEditForm, ApiBookmarkRangeEditForm,
                        ApiBookmarkSearchForm, ApiTagForm, ApiFetchDataForm, ApiBookmarksReorderForm)
 except ImportError:
     from bukuserver import _
     from bukuserver.response import Response
-    from bukuserver.forms import (TAG_RE, ApiBookmarkCreateForm, ApiBookmarkEditForm, ApiBookmarkRangeEditForm,
+    from bukuserver.forms import (TAG_RE, ApiBookmarksForm, ApiBookmarkCreateForm, ApiBookmarkEditForm, ApiBookmarkRangeEditForm,
                                   ApiBookmarkSearchForm, ApiTagForm, ApiFetchDataForm, ApiBookmarksReorderForm)
 
 
@@ -190,9 +191,15 @@ class ApiTagView(MethodView):
 
 class ApiBookmarksView(MethodView):
     def get(self):
+        form = ApiBookmarksForm(request.args)
+        if not form.validate():
+            return Response.INPUT_NOT_VALID(data={'errors': form.errors})
         with get_bukudb() as bukudb:
-            order = request.args.getlist('order')
+            order = form.order.data or []
             all_bookmarks = bukudb.get_rec_all(order=order)
+            pick = form.random.data
+            if pick is not None and pick < len(all_bookmarks):
+                all_bookmarks = bukudb._sort(random.sample(all_bookmarks, pick), order or ['+id'])
             return Response.SUCCESS(data={'bookmarks': [entity(bookmark, index=order)
                                                         for bookmark in all_bookmarks]})
 
@@ -302,7 +309,13 @@ class ApiBookmarkSearchView(MethodView):
         if not form.validate():
             return Response.INPUT_NOT_VALID(data={'errors': form.errors})
         with get_bukudb() as bukudb:
-            result = [entity(bookmark, index=True) for bookmark in bukudb.searchdb(**form.data)]
+            search_kwargs = {k: v for k, v in form.data.items() if k != 'random'}
+            bookmarks = list(bukudb.searchdb(**search_kwargs))
+            pick = form.random.data
+            if pick is not None and pick < len(bookmarks):
+                order = form.order.data or ['+id']
+                bookmarks = bukudb._sort(random.sample(bookmarks, pick), order)
+            result = [entity(bookmark, index=True) for bookmark in bookmarks]
             current_app.logger.debug('total bookmarks:{}'.format(len(result)))
             return Response.SUCCESS(data={'bookmarks': result})
 
@@ -311,7 +324,8 @@ class ApiBookmarkSearchView(MethodView):
         if not form.validate():
             return Response.INPUT_NOT_VALID(data={'errors': form.errors})
         with get_bukudb() as bukudb:
-            deleted, failed, indices = 0, 0, {x.id for x in bukudb.searchdb(**form.data)}
+            search_kwargs = {k: v for k, v in form.data.items() if k != 'random'}
+            deleted, failed, indices = 0, 0, {x.id for x in bukudb.searchdb(**search_kwargs)}
             current_app.logger.debug('total bookmarks:{}'.format(len(indices)))
             for index in sorted(indices, reverse=True):
                 if bukudb.delete_rec(index, retain_order=True):
