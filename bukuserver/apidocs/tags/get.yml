@@ -4,6 +4,25 @@ Fetch the list of all tags
 
 tags: [Tags]
 
+parameters:
+  - name: query
+    in: query
+    required: false
+    type: string
+    description: "Case-insensitive substring filter; only tags whose name contains it are returned"
+  - name: limit
+    in: query
+    required: false
+    type: integer
+    minimum: 1
+    description: "Return at most this many tags, keeping the most-used ones first"
+  - name: withusage
+    in: query
+    required: false
+    type: boolean
+    default: false
+    description: "Include a 'usage_count' object mapping each returned tag to its usage count"
+
 responses:
   200:
     description: A list of tags (sorted lexicographically)
@@ -17,3 +36,14 @@ responses:
               items:
                 type: string
               example: ['bar', 'baz', 'foo']
+            usage_count:
+              type: object
+              description: "Present only when 'withusage' is true; maps each returned tag to its usage count"
+              additionalProperties:
+                type: integer
+              example: {'bar': 3, 'baz': 1, 'foo': 5}
+
+  422:
+    description: Invalid query parameter (e.g. non-positive or non-integer limit)
+    schema:
+      $ref: '#/definitions/Response:InputNotValid'

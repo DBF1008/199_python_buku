@@ -145,8 +145,30 @@ get_tiny_url = swag_from('./apidocs/tiny_url/get.yml')(lambda index: Response.RE
 
 @swag_from('./apidocs/tags/get.yml')
 def get_all_tags():
+    query = (request.args.get('query') or '').strip().lower() or None
+    withusage = _parse_bool(request.args.get('withusage', 'false'))
+    limit_arg = request.args.get('limit')
+    limit = None
+    if limit_arg is not None:
+        try:
+            limit = int(limit_arg)
+        except ValueError:
+            return Response.INPUT_NOT_VALID(data={'errors': {'limit': ['Not a valid integer.']}})
+        if limit < 1:
+            return Response.INPUT_NOT_VALID(data={'errors': {'limit': ['Must be a positive integer.']}})
     with get_bukudb() as bdb:
-        return Response.SUCCESS(data={"tags": search_tag(db=bdb, limit=5)[0]})
+        # search_tag's stag matches whole bookmark tag-strings (so it returns co-occurring tags
+        # and undercounts usage); fetch every tag with accurate counts and filter names here instead.
+        counts = search_tag(db=bdb)[1]
+        if query:
+            counts = {tag: n for tag, n in counts.items() if query in tag.lower()}
+        if limit is not None:
+            counts = dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit])
+        tags = sorted(counts)
+        data = {'tags': tags}
+        if withusage:
+            data['usage_count'] = {tag: counts[tag] for tag in tags}
+        return Response.SUCCESS(data=data)
 
 class ApiTagView(MethodView):
     def get(self, tag: str):

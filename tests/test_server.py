@@ -141,6 +141,59 @@ def test_api_tag(client):
     assert_response(rd, Response.SUCCESS, {'description': '', 'tags': ['tag2', 'tag5'], 'title': 'Google', 'url': url})
 
 
+def test_api_tags_search(client):
+    bookmarks = [
+        ('http://a.com', ['python', 'web', 'flask', 'cli']),
+        ('http://b.com', ['python', 'web', 'flask']),
+        ('http://c.com', ['python', 'web']),
+        ('http://d.com', ['python']),
+    ]
+    for index, (url, tags) in enumerate(bookmarks, start=1):
+        rd = client.post('/api/bookmarks', json={'url': url, 'tags': tags, 'fetch': False})
+        assert_response(rd, Response.SUCCESS, {'index': index})
+    # usage_count totals: python=4, web=3, flask=2, cli=1
+
+    # backward-compatible default: sorted tag names only, no usage counts
+    rd = client.get('/api/tags')
+    assert_response(rd, Response.SUCCESS, {'tags': ['cli', 'flask', 'python', 'web']})
+
+    # usage counts on demand
+    rd = client.get('/api/tags', query_string={'withusage': 'true'})
+    assert_response(rd, Response.SUCCESS, {
+        'tags': ['cli', 'flask', 'python', 'web'],
+        'usage_count': {'cli': 1, 'flask': 2, 'python': 4, 'web': 3}})
+
+    # keyword (substring) filter matches only tag names, with accurate counts
+    rd = client.get('/api/tags', query_string={'query': 'l'})
+    assert_response(rd, Response.SUCCESS, {'tags': ['cli', 'flask']})
+    rd = client.get('/api/tags', query_string={'query': 'l', 'withusage': 'true'})
+    assert_response(rd, Response.SUCCESS, {'tags': ['cli', 'flask'], 'usage_count': {'cli': 1, 'flask': 2}})
+
+    # filter is case-insensitive
+    rd = client.get('/api/tags', query_string={'query': 'PY'})
+    assert_response(rd, Response.SUCCESS, {'tags': ['python']})
+
+    # no match yields an empty list
+    rd = client.get('/api/tags', query_string={'query': 'zzz'})
+    assert_response(rd, Response.SUCCESS, {'tags': []})
+
+    # limit keeps the most-used tags, returned alphabetically
+    rd = client.get('/api/tags', query_string={'limit': 2})
+    assert_response(rd, Response.SUCCESS, {'tags': ['python', 'web']})
+    rd = client.get('/api/tags', query_string={'limit': 2, 'withusage': 'true'})
+    assert_response(rd, Response.SUCCESS, {'tags': ['python', 'web'], 'usage_count': {'python': 4, 'web': 3}})
+
+    # limit and query combine
+    rd = client.get('/api/tags', query_string={'query': 'l', 'limit': 1})
+    assert_response(rd, Response.SUCCESS, {'tags': ['flask']})
+
+    # invalid limit is rejected
+    rd = client.get('/api/tags', query_string={'limit': 0})
+    assert_response(rd, Response.INPUT_NOT_VALID, data={'errors': {'limit': ['Must be a positive integer.']}})
+    rd = client.get('/api/tags', query_string={'limit': 'abc'})
+    assert_response(rd, Response.INPUT_NOT_VALID, data={'errors': {'limit': ['Not a valid integer.']}})
+
+
 def test_api_bookmark(client):
     url = 'http://google.com'
     rd = client.post('/api/bookmarks', json={})
