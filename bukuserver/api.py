@@ -145,8 +145,26 @@ get_tiny_url = swag_from('./apidocs/tiny_url/get.yml')(lambda index: Response.RE
 
 @swag_from('./apidocs/tags/get.yml')
 def get_all_tags():
+    stag = request.args.get('q', '').strip() or None
+    try:
+        limit = int(request.args['limit']) if 'limit' in request.args else 5
+    except ValueError:
+        limit = 5
+    with_usage = _parse_bool(request.args.get('with_usage_count', 'false'))
     with get_bukudb() as bdb:
-        return Response.SUCCESS(data={"tags": search_tag(db=bdb, limit=5)[0]})
+        tag_list, counter = search_tag(db=bdb, stag=stag, limit=None)
+        # Post-filter: when searching by keyword, only keep tags that actually match
+        if stag:
+            stag_lower = stag.lower()
+            tag_list = [t for t in tag_list if stag_lower in t.lower()]
+        if with_usage:
+            tags_data = [{"name": t, "usage_count": counter.get(t, 0)} for t in tag_list]
+            if limit and limit > 0:
+                tags_data = sorted(tags_data, key=lambda x: (-x["usage_count"], x["name"]))[:limit]
+            return Response.SUCCESS(data={"tags": tags_data})
+        if limit and limit > 0:
+            tag_list = tag_list[:limit]
+        return Response.SUCCESS(data={"tags": tag_list})
 
 class ApiTagView(MethodView):
     def get(self, tag: str):

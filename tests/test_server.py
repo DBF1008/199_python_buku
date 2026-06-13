@@ -141,6 +141,83 @@ def test_api_tag(client):
     assert_response(rd, Response.SUCCESS, {'description': '', 'tags': ['tag2', 'tag5'], 'title': 'Google', 'url': url})
 
 
+def test_api_tag_search(client):
+    """Test GET /api/tags with query parameters: q, limit, with_usage_count."""
+    # Set up bookmarks with various tags for search testing
+    for i, (url, tags) in enumerate([
+        ('http://a.com', ['python', 'flask', 'web']),
+        ('http://b.com', ['python', 'django', 'web']),
+        ('http://c.com', ['python', 'fastapi', 'api']),
+        ('http://d.com', ['javascript', 'react', 'web']),
+        ('http://e.com', ['rust', 'systems']),
+        ('http://f.com', ['go', 'systems']),
+    ], start=1):
+        with mock_fetch(title=f'Page {i}'):
+            rd = client.post('/api/bookmarks', json={'url': url, 'tags': tags, 'fetch': True})
+        assert_response(rd, Response.SUCCESS, {'index': i})
+
+    # Default behavior: no params, returns up to 5 tags alphabetically (backward compatible)
+    rd = client.get('/api/tags')
+    assert_response(rd, Response.SUCCESS, {'tags': ['api', 'django', 'fastapi', 'flask', 'go']})
+
+    # Filter by keyword 'py'
+    rd = client.get('/api/tags', query_string={'q': 'py'})
+    assert_response(rd, Response.SUCCESS, {'tags': ['python']})
+
+    # Filter by keyword 'web'
+    rd = client.get('/api/tags', query_string={'q': 'web'})
+    assert_response(rd, Response.SUCCESS, {'tags': ['web']})
+
+    # Filter with limit
+    rd = client.get('/api/tags', query_string={'q': '', 'limit': 3})
+    assert_response(rd, Response.SUCCESS, {'tags': ['api', 'django', 'fastapi']})
+
+    # Increase limit beyond total tag count
+    rd = client.get('/api/tags', query_string={'limit': 100})
+    assert rd.status_code == 200
+    tags = rd.get_json()['tags']
+    assert len(tags) == 11  # all unique tags
+
+    # Invalid limit falls back to 5
+    rd = client.get('/api/tags', query_string={'limit': 'abc'})
+    assert_response(rd, Response.SUCCESS, {'tags': ['api', 'django', 'fastapi', 'flask', 'go']})
+
+    # With usage_count
+    rd = client.get('/api/tags', query_string={'with_usage_count': 'true', 'limit': 5})
+    assert rd.status_code == 200
+    data = rd.get_json()
+    tags_data = data['tags']
+    assert len(tags_data) == 5
+    # python is used in 3 bookmarks, web in 3 bookmarks - they should be at the top
+    assert tags_data[0]['name'] == 'python'
+    assert tags_data[0]['usage_count'] == 3
+    assert tags_data[1]['name'] == 'web'
+    assert tags_data[1]['usage_count'] == 3
+    # Each item should have name and usage_count keys
+    for item in tags_data:
+        assert 'name' in item
+        assert 'usage_count' in item
+        assert isinstance(item['usage_count'], int)
+
+    # With usage_count and keyword filter
+    rd = client.get('/api/tags', query_string={'q': 's', 'with_usage_count': 'true', 'limit': 10})
+    assert rd.status_code == 200
+    data = rd.get_json()
+    tag_names = [t['name'] for t in data['tags']]
+    # 'systems' (used 2x), 'flask' (used 1x), 'fastapi' (used 1x), 'javascript' (used 1x), 'react' (used 1x)
+    # 'systems' should be first due to highest usage
+    assert tag_names[0] == 'systems'
+    assert data['tags'][0]['usage_count'] == 2
+
+    # Empty keyword should return all tags (no filter)
+    rd = client.get('/api/tags', query_string={'q': '', 'limit': 2})
+    assert_response(rd, Response.SUCCESS, {'tags': ['api', 'django']})
+
+    # Non-matching keyword returns empty list
+    rd = client.get('/api/tags', query_string={'q': 'zzzzz'})
+    assert_response(rd, Response.SUCCESS, {'tags': []})
+
+
 def test_api_bookmark(client):
     url = 'http://google.com'
     rd = client.post('/api/bookmarks', json={})
