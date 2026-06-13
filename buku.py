@@ -2674,15 +2674,17 @@ class BukuDb:
         if pick and pick < len(resultset):
             resultset = self._sort(random.sample(resultset, pick), order)
 
+        fmt = detect_format(filepath)
+
         if os.path.exists(filepath):
             resp = read_in(filepath + ' exists. Overwrite? (y/n): ')
             if resp != 'y':
                 return False
 
-            if filepath.endswith('.db'):
+            if fmt == FMT_DB:
                 os.remove(filepath)
 
-        if filepath.endswith('.db'):
+        if fmt == FMT_DB:
             outdb = BukuDb(dbfile=filepath)
             qry = 'INSERT INTO bookmarks(URL, metadata, tags, desc, flags) VALUES (?, ?, ?, ?, ?)'
             for row in resultset:
@@ -2697,28 +2699,19 @@ class BukuDb:
             print('%s exported' % count)
             return True
 
+        # Map canonical format label to the convert_bookmark_set type string.
+        _EXPORT_TYPE = {
+            FMT_MARKDOWN: 'markdown',
+            FMT_ORG:      'org',
+            FMT_XBEL:     'xbel',
+            FMT_RSS:      'rss',
+        }
+        export_type = _EXPORT_TYPE.get(fmt, 'html')
+
         with open(filepath, mode='w', encoding='utf-8') as outfp:
-            res = {}  # type: Dict
-            if filepath.endswith('.md'):
-                res = convert_bookmark_set(resultset, 'markdown', old)
-                count += res['count']
-                outfp.write(res['data'])
-            elif filepath.endswith('.org'):
-                res = convert_bookmark_set(resultset, 'org', old)
-                count += res['count']
-                outfp.write(res['data'])
-            elif filepath.endswith('.xbel'):
-                res = convert_bookmark_set(resultset, 'xbel', old)
-                count += res['count']
-                outfp.write(res['data'])
-            elif filepath.endswith('.rss') or filepath.endswith('.atom'):
-                res = convert_bookmark_set(resultset, 'rss', old)
-                count += res['count']
-                outfp.write(res['data'])
-            else:
-                res = convert_bookmark_set(resultset, 'html', old)
-                count += res['count']
-                outfp.write(res['data'])
+            res = convert_bookmark_set(resultset, export_type, old)
+            count += res['count']
+            outfp.write(res['data'])
             print('%s exported' % count)
             return True
         return False
@@ -3017,7 +3010,9 @@ class BukuDb:
             True on success, False on failure.
         """
 
-        if filepath.endswith('.db'):
+        fmt = detect_format(filepath)
+
+        if fmt == FMT_DB:
             return self.mergedb(filepath)
 
         newtag = None
@@ -3028,13 +3023,13 @@ class BukuDb:
             append_tags_resp = input('Append tags when bookmark exist? (y/n): ')
 
         items = []
-        if filepath.endswith('.md'):
+        if fmt == FMT_MARKDOWN:
             items = import_md(filepath=filepath, newtag=newtag)
-        elif filepath.endswith('org'):
+        elif fmt == FMT_ORG:
             items = import_org(filepath=filepath, newtag=newtag)
-        elif filepath.endswith('rss') or filepath.endswith('atom'):
+        elif fmt == FMT_RSS:
             items = import_rss(filepath=filepath, newtag=newtag)
-        elif filepath.endswith('json'):
+        elif fmt == FMT_JSON:
             if not tacit:
                 resp = input('Add parent folder names as tags? (y/n): ')
             else:
@@ -3051,7 +3046,7 @@ class BukuDb:
             except Exception as e:
                 LOGERR(e)
                 return False
-        elif filepath.endswith('xbel'):
+        elif fmt == FMT_XBEL:
             try:
                 with open(filepath, mode='r', encoding='utf-8') as infp:
                     soup = BeautifulSoup(infp, 'html.parser')
@@ -3442,6 +3437,55 @@ def convert_tags_to_org_mode_tags(tags: str) -> str:
         if buku_tags:
             return ' :{}:\n'.format(':'.join(buku_tags))
     return '\n'
+
+
+# ---------------------------------------------------------------------------
+# Import / export file-format detection
+# ---------------------------------------------------------------------------
+# Canonical format labels returned by detect_format().
+FMT_DB = 'db'
+FMT_MARKDOWN = 'md'
+FMT_ORG = 'org'
+FMT_XBEL = 'xbel'
+FMT_RSS = 'rss'       # covers both .rss and .atom
+FMT_JSON = 'json'
+FMT_HTML = 'html'     # default / fallback
+
+# Maps a normalised, dot-prefixed, lowercase extension to a format label.
+_EXT_TO_FORMAT = {
+    '.db':    FMT_DB,
+    '.md':    FMT_MARKDOWN,
+    '.org':   FMT_ORG,
+    '.xbel':  FMT_XBEL,
+    '.rss':   FMT_RSS,
+    '.atom':  FMT_RSS,
+    '.json':  FMT_JSON,
+    '.html':  FMT_HTML,
+    '.htm':   FMT_HTML,
+}
+
+
+def detect_format(filepath: str) -> str:
+    """Return the canonical import/export format label for *filepath*.
+
+    Detection is case-insensitive and always requires a leading dot in the
+    extension so that names like ``blog`` (no dot) are **not** misidentified
+    as ``.org`` or ``myrss`` as ``.rss``.
+
+    Parameters
+    ----------
+    filepath : str
+        Path (or just a filename) whose extension should be inspected.
+
+    Returns
+    -------
+    str
+        One of the ``FMT_*`` constants.  Falls back to ``FMT_HTML`` when the
+        extension is absent or unrecognised, matching the historical default
+        for both ``exportdb()`` and ``importdb()``.
+    """
+    _, ext = os.path.splitext(filepath)
+    return _EXT_TO_FORMAT.get(ext.lower(), FMT_HTML)
 
 
 def convert_bookmark_set(

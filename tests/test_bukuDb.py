@@ -1995,5 +1995,118 @@ def normalize_range(db_len, low, high):
     return (n_low, n_high)
 
 
+# ---------------------------------------------------------------------------
+# importdb / exportdb dispatch — regression tests for unified format detection
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize('ext,expected_handler', [
+    # Uppercase extensions must route to the same handler as lowercase ones.
+    ('.MD',   'buku.import_md'),
+    ('.Org',  'buku.import_org'),
+    ('.XBEL', 'buku.import_xbel'),
+    ('.RSS',  'buku.import_rss'),
+    ('.ATOM', 'buku.import_rss'),
+    ('.JSON', 'buku.import_firefox_json'),
+    # Lowercase — sanity check
+    ('.md',   'buku.import_md'),
+    ('.org',  'buku.import_org'),
+    ('.rss',  'buku.import_rss'),
+    ('.atom', 'buku.import_rss'),
+    ('.json', 'buku.import_firefox_json'),
+    ('.xbel', 'buku.import_xbel'),
+])
+def test_importdb_dispatches_by_normalised_extension(bukuDb, tmpdir, ext, expected_handler):
+    """importdb() must dispatch to the correct parser regardless of case."""
+    db = bukuDb()
+    _add_rec(db, "http://example.com")
+    target = tmpdir.join("bookmarks" + ext)
+
+    # For .json we need valid JSON content
+    if ext.lower() == '.json':
+        target.write('{"children": []}')
+    elif ext.lower() in ('.xbel',):
+        target.write('<?xml version="1.0"?><xbel></xbel>')
+    elif ext.lower() in ('.rss', '.atom'):
+        target.write('<feed xmlns="http://www.w3.org/2005/Atom"><title>t</title></feed>')
+    else:
+        target.write('[example](http://example.com)\n')
+
+    with mock.patch(expected_handler, return_value=[]) as patched:
+        db.importdb(target.strpath, tacit=True)
+        patched.assert_called()
+
+
+def test_importdb_dotless_filename_does_not_match_org(bukuDb, tmpdir):
+    """A file named 'blog' (no dot) must NOT be dispatched to import_org.
+
+    This was the original bug: ``filepath.endswith('org')`` matched any
+    filename whose last three characters were "org".
+    """
+    db = bukuDb()
+    _add_rec(db, "http://example.com")
+    target = tmpdir.join("blog")
+    target.write('<DT><A HREF="http://example.com">example</A>\n')
+
+    with mock.patch('buku.import_org') as mock_org, \
+         mock.patch('buku.import_html', return_value=[]) as mock_html:
+        db.importdb(target.strpath, tacit=True)
+        mock_org.assert_not_called()
+        # Without a recognised extension, the file falls through to HTML import.
+        mock_html.assert_called()
+
+
+def test_importdb_dotless_filename_does_not_match_json(bukuDb, tmpdir):
+    """A file named 'catalogjson' (no dot) must NOT be dispatched to JSON import."""
+    db = bukuDb()
+    _add_rec(db, "http://example.com")
+    target = tmpdir.join("catalogjson")
+    target.write('<DT><A HREF="http://example.com">example</A>\n')
+
+    with mock.patch('buku.import_firefox_json') as mock_json, \
+         mock.patch('buku.import_html', return_value=[]) as mock_html:
+        db.importdb(target.strpath, tacit=True)
+        mock_json.assert_not_called()
+        mock_html.assert_called()
+
+
+@pytest.mark.parametrize('ext,expected_type', [
+    ('.MD',   'markdown'),
+    ('.Org',  'org'),
+    ('.XBEL', 'xbel'),
+    ('.RSS',  'rss'),
+    ('.ATOM', 'rss'),
+    ('.md',   'markdown'),
+    ('.org',  'org'),
+    ('.xbel', 'xbel'),
+    ('.rss',  'rss'),
+    ('.atom', 'rss'),
+])
+def test_exportdb_dispatches_by_normalised_extension(bukuDb, tmpdir, ext, expected_type):
+    """exportdb() must pick the right converter regardless of extension case."""
+    db = bukuDb()
+    _add_rec(db, "http://example.com")
+    target = tmpdir.join("bookmarks" + ext)
+
+    with mock.patch('buku.convert_bookmark_set',
+                    return_value={'data': '', 'count': 0}) as patched:
+        db.exportdb(target.strpath)
+        patched.assert_called_once()
+        # The second positional arg is the export type string.
+        actual_type = patched.call_args[0][1]
+        assert actual_type == expected_type
+
+
+def test_exportdb_uppercase_db_extension(bukuDb, tmpdir):
+    """A ``.DB`` (uppercase) export must create a buku database, not a text file."""
+    db = bukuDb()
+    _add_rec(db, "http://example.com")
+    target = tmpdir.join("exported.DB")
+
+    db.exportdb(target.strpath)
+    # Verify a valid SQLite DB was written (not an HTML/MD text dump).
+    db2 = BukuDb(dbfile=target.strpath)
+    assert db2.get_rec_all()
+
+
 if __name__ == "__main__":
     unittest.main()

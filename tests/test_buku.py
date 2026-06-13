@@ -1146,3 +1146,69 @@ def test_SortKey():
 
     custom_order = lambda s: (SortKey(len(s), ascending=False), SortKey(s, ascending=True))
     assert sorted(['foo', 'bar', 'baz', 'quux'], key=custom_order) == ['quux', 'bar', 'baz', 'foo']
+
+
+# ---------------------------------------------------------------------------
+# detect_format() — regression tests for unified extension detection
+# ---------------------------------------------------------------------------
+
+from buku import (
+    detect_format,
+    FMT_DB, FMT_MARKDOWN, FMT_ORG, FMT_XBEL, FMT_RSS, FMT_JSON, FMT_HTML,
+)
+
+
+@pytest.mark.parametrize('filepath, expected', [
+    # --- normalised, lowercase, dot-prefixed extensions ---
+    ('/tmp/bookmarks.db',       FMT_DB),
+    ('/tmp/bookmarks.md',       FMT_MARKDOWN),
+    ('/tmp/bookmarks.org',      FMT_ORG),
+    ('/tmp/bookmarks.xbel',     FMT_XBEL),
+    ('/tmp/bookmarks.rss',      FMT_RSS),
+    ('/tmp/bookmarks.atom',     FMT_RSS),
+    ('/tmp/bookmarks.json',     FMT_JSON),
+    ('/tmp/bookmarks.html',     FMT_HTML),
+    ('/tmp/bookmarks.htm',      FMT_HTML),
+    # --- uppercase extensions (case-insensitive) ---
+    ('/tmp/bookmarks.DB',       FMT_DB),
+    ('/tmp/bookmarks.MD',       FMT_MARKDOWN),
+    ('/tmp/bookmarks.ORG',      FMT_ORG),
+    ('/tmp/bookmarks.XBEL',     FMT_XBEL),
+    ('/tmp/bookmarks.RSS',      FMT_RSS),
+    ('/tmp/bookmarks.ATOM',     FMT_RSS),
+    ('/tmp/bookmarks.JSON',     FMT_JSON),
+    ('/tmp/bookmarks.HTML',     FMT_HTML),
+    # --- mixed case ---
+    ('/tmp/bookmarks.Md',       FMT_MARKDOWN),
+    ('/tmp/bookmarks.Org',      FMT_ORG),
+    ('/tmp/bookmarks.Xbel',     FMT_XBEL),
+    ('/tmp/bookmarks.Rss',      FMT_RSS),
+    ('/tmp/bookmarks.Atom',     FMT_RSS),
+    ('/tmp/bookmarks.Json',     FMT_JSON),
+    # --- dot-less tail strings must NOT match (the old importdb bug) ---
+    ('blog',                    FMT_HTML),   # would have matched 'org' before
+    ('myrss',                   FMT_HTML),   # would have matched 'rss' before
+    ('myatom',                  FMT_HTML),   # would have matched 'atom' before
+    ('catalogjson',             FMT_HTML),   # would have matched 'json' before
+    ('myxbel',                  FMT_HTML),   # would have matched 'xbel' before
+    # --- no extension / unknown extension → fallback to HTML ---
+    ('no_extension',            FMT_HTML),
+    ('/tmp/file',               FMT_HTML),
+    ('/tmp/file.txt',           FMT_HTML),
+    ('/tmp/file.csv',           FMT_HTML),
+    # --- filename with dots but recognised extension ---
+    ('/tmp/my.bookmarks.html',  FMT_HTML),
+    ('/tmp/my.bookmarks.org',   FMT_ORG),
+    # --- path with directory dots ---
+    ('/home/user.name/bk.org',  FMT_ORG),
+    # --- bare filename with valid extension ---
+    ('test.md',                 FMT_MARKDOWN),
+    ('test.org',                FMT_ORG),
+])
+def test_detect_format(filepath, expected):
+    assert detect_format(filepath) == expected
+
+
+def test_detect_format_empty_string():
+    """Empty path has no meaningful extension; should fall back to HTML."""
+    assert detect_format('') == FMT_HTML
