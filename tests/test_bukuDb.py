@@ -18,7 +18,7 @@ import yaml
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
-from buku import PERMANENT_REDIRECTS, BukuDb, FetchResult, BookmarkVar, bookmark_vars, parse_tags, prompt
+from buku import PERMANENT_REDIRECTS, BukuDb, FetchResult, BookmarkVar, bookmark_file_format, bookmark_vars, parse_tags, prompt
 from tests.util import mock_fetch, _add_rec, _tagset
 
 
@@ -1892,6 +1892,78 @@ def test_exportdb_to_db(bukuDb):
         db.exportdb(f2.name)
     db2 = bukuDb(dbfile=f2.name)
     assert db.get_rec_all() == db2.get_rec_all()
+
+
+@pytest.mark.parametrize('filepath, expected', [
+    # canonical lower-case extensions
+    ('bookmarks.db', 'db'),
+    ('bookmarks.md', 'markdown'),
+    ('bookmarks.org', 'org'),
+    ('bookmarks.xbel', 'xbel'),
+    ('bookmarks.rss', 'rss'),
+    ('bookmarks.atom', 'rss'),
+    ('bookmarks.json', 'json'),
+    ('bookmarks.html', 'html'),
+    # detection must be case-insensitive (regression: upper-case extensions used
+    # to fall through to the HTML branch on both the import and export paths)
+    ('BOOKMARKS.DB', 'db'),
+    ('Bookmarks.Md', 'markdown'),
+    ('Bookmarks.ORG', 'org'),
+    ('Bookmarks.XBEL', 'xbel'),
+    ('Bookmarks.Rss', 'rss'),
+    ('Bookmarks.ATOM', 'rss'),
+    ('Bookmarks.Json', 'json'),
+    ('Bookmarks.HTML', 'html'),
+    # only the real extension counts, not arbitrary trailing substrings
+    # (regression: importdb used endswith('org')/('rss')/('atom')/('json')/('xbel'))
+    ('cyborg', 'html'),
+    ('notjson', 'html'),
+    ('data.geojson', 'html'),
+    ('feed.notrss', 'html'),
+    ('myatom', 'html'),
+    ('weird.notxbel', 'html'),
+    # unknown / missing extensions fall back to html
+    ('plain', 'html'),
+    ('archive.tar.gz', 'html'),
+    ('', 'html'),
+    # the last extension wins; leading directories containing dots are ignored
+    ('bookmarks.db.bak', 'html'),
+    ('/tmp/sub.dir/Export.JSON', 'json'),
+])
+def test_bookmark_file_format(filepath, expected):
+    '''Format detection is case-insensitive and uses the real file extension.'''
+    assert bookmark_file_format(filepath) == expected
+
+
+def test_bookmark_file_format_default_override():
+    assert bookmark_file_format('archive.tar.gz', default='db') == 'db'
+    assert bookmark_file_format('bookmarks.md', default='db') == 'markdown'
+
+
+def test_exportdb_to_db_uppercase_extension(bukuDb):
+    '''Regression: an upper-case '.DB' target must be exported as a buku
+    database (case-insensitive detection), not as an HTML file.'''
+    f1 = NamedTemporaryFile(delete=False)
+    f1.close()
+    f2 = NamedTemporaryFile(delete=False, suffix='.DB')
+    f2.close()
+    db = bukuDb(dbfile=f1.name)
+    _add_rec(db, 'http://example.com')
+    _add_rec(db, 'http://google.com')
+    with mock.patch('builtins.input', return_value='y'):
+        db.exportdb(f2.name)
+    db2 = bukuDb(dbfile=f2.name)
+    assert db.get_rec_all() == db2.get_rec_all()
+
+
+@mock.patch('buku.import_md', return_value=[])
+def test_importdb_uppercase_extension_dispatch(import_md_mock, bukuDb):
+    '''Regression: importdb() must route '.MD' (any case) to the Markdown
+    importer rather than treating it as HTML.'''
+    db = bukuDb()
+    assert db.importdb('bookmarks.MD', tacit=True)
+    assert import_md_mock.call_count == 1
+    assert import_md_mock.call_args.kwargs['filepath'] == 'bookmarks.MD'
 
 
 @pytest.mark.parametrize('pick', [None, 0, 3, 7, 10])

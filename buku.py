@@ -2632,7 +2632,8 @@ class BukuDb:
         If destination file name ends with '.rss'/'.atom' bookmarks are
         exported to an RSS file.
         Otherwise, bookmarks are exported to a Firefox bookmarks.html
-        formatted file.
+        formatted file. The destination format is detected from the file
+        extension, case-insensitively.
 
         Parameters
         ----------
@@ -2674,15 +2675,17 @@ class BukuDb:
         if pick and pick < len(resultset):
             resultset = self._sort(random.sample(resultset, pick), order)
 
+        fmt = bookmark_file_format(filepath)
+
         if os.path.exists(filepath):
             resp = read_in(filepath + ' exists. Overwrite? (y/n): ')
             if resp != 'y':
                 return False
 
-            if filepath.endswith('.db'):
+            if fmt == 'db':
                 os.remove(filepath)
 
-        if filepath.endswith('.db'):
+        if fmt == 'db':
             outdb = BukuDb(dbfile=filepath)
             qry = 'INSERT INTO bookmarks(URL, metadata, tags, desc, flags) VALUES (?, ?, ?, ?, ?)'
             for row in resultset:
@@ -2698,27 +2701,12 @@ class BukuDb:
             return True
 
         with open(filepath, mode='w', encoding='utf-8') as outfp:
-            res = {}  # type: Dict
-            if filepath.endswith('.md'):
-                res = convert_bookmark_set(resultset, 'markdown', old)
-                count += res['count']
-                outfp.write(res['data'])
-            elif filepath.endswith('.org'):
-                res = convert_bookmark_set(resultset, 'org', old)
-                count += res['count']
-                outfp.write(res['data'])
-            elif filepath.endswith('.xbel'):
-                res = convert_bookmark_set(resultset, 'xbel', old)
-                count += res['count']
-                outfp.write(res['data'])
-            elif filepath.endswith('.rss') or filepath.endswith('.atom'):
-                res = convert_bookmark_set(resultset, 'rss', old)
-                count += res['count']
-                outfp.write(res['data'])
-            else:
-                res = convert_bookmark_set(resultset, 'html', old)
-                count += res['count']
-                outfp.write(res['data'])
+            # 'json' has no export serializer (see convert_bookmark_set); like any
+            # unrecognized extension it falls back to the Firefox HTML format.
+            export_type = fmt if fmt in ('markdown', 'org', 'xbel', 'rss') else 'html'
+            res = convert_bookmark_set(resultset, export_type, old)  # type: Dict
+            count += res['count']
+            outfp.write(res['data'])
             print('%s exported' % count)
             return True
         return False
@@ -3000,6 +2988,7 @@ class BukuDb:
         Supports RSS files with extension '.rss', '.atom'.
         Supports Markdown files with extension '.md', '.org'.
         Supports importing bookmarks from another buku database file.
+        The source format is detected from the file extension, case-insensitively.
 
         Parameters
         ----------
@@ -3017,7 +3006,8 @@ class BukuDb:
             True on success, False on failure.
         """
 
-        if filepath.endswith('.db'):
+        fmt = bookmark_file_format(filepath)
+        if fmt == 'db':
             return self.mergedb(filepath)
 
         newtag = None
@@ -3028,13 +3018,13 @@ class BukuDb:
             append_tags_resp = input('Append tags when bookmark exist? (y/n): ')
 
         items = []
-        if filepath.endswith('.md'):
+        if fmt == 'markdown':
             items = import_md(filepath=filepath, newtag=newtag)
-        elif filepath.endswith('org'):
+        elif fmt == 'org':
             items = import_org(filepath=filepath, newtag=newtag)
-        elif filepath.endswith('rss') or filepath.endswith('atom'):
+        elif fmt == 'rss':
             items = import_rss(filepath=filepath, newtag=newtag)
-        elif filepath.endswith('json'):
+        elif fmt == 'json':
             if not tacit:
                 resp = input('Add parent folder names as tags? (y/n): ')
             else:
@@ -3051,7 +3041,7 @@ class BukuDb:
             except Exception as e:
                 LOGERR(e)
                 return False
-        elif filepath.endswith('xbel'):
+        elif fmt == 'xbel':
             try:
                 with open(filepath, mode='r', encoding='utf-8') as infp:
                     soup = BeautifulSoup(infp, 'html.parser')
@@ -3442,6 +3432,48 @@ def convert_tags_to_org_mode_tags(tags: str) -> str:
         if buku_tags:
             return ' :{}:\n'.format(':'.join(buku_tags))
     return '\n'
+
+
+# File-extension -> canonical bookmark format. Shared by importdb() and exportdb()
+# so that format detection stays consistent across both paths, is case-insensitive,
+# and is based on the *actual* file extension rather than arbitrary trailing
+# substrings. The values for the text formats deliberately match the export types
+# accepted by convert_bookmark_set(); 'db' and 'json' are handled separately.
+BOOKMARK_FILE_FORMATS = {
+    '.db': 'db',
+    '.md': 'markdown',
+    '.org': 'org',
+    '.xbel': 'xbel',
+    '.rss': 'rss',
+    '.atom': 'rss',
+    '.json': 'json',
+    '.html': 'html',
+}
+
+
+def bookmark_file_format(filepath, default='html'):
+    """Resolve a bookmark file's format from its extension.
+
+    The lookup is case-insensitive and uses the real file extension (via
+    os.path.splitext), so upper-case extensions (e.g. '.JSON', '.DB') and
+    lookalike suffixes (e.g. 'cyborg', 'notjson', 'data.geojson') are handled
+    consistently across import and export. Paths with an unrecognized or missing
+    extension resolve to ``default``.
+
+    Parameters
+    ----------
+    filepath : str
+        Path whose extension determines the format.
+    default : str
+        Format returned for unrecognized/missing extensions. Default is 'html'.
+
+    Returns
+    -------
+    str
+        A canonical format name (a value of BOOKMARK_FILE_FORMATS) or ``default``.
+    """
+    ext = os.path.splitext(filepath or '')[1].lower()
+    return BOOKMARK_FILE_FORMATS.get(ext, default)
 
 
 def convert_bookmark_set(
