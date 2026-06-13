@@ -45,6 +45,26 @@ parameters:
       * `#,` is the same but will match _**full** tags only_
       * `*` will be searched for in _all fields_ (implied if no prefix was provided)
 
+  - name: stag
+    in: query
+    collectionFormat: multi
+    type: array
+    items:
+      type: string
+    example: ["tag1,tag2", "tag3 + tag4"]
+    description: |-
+      Narrows the keyword matches down to bookmarks having the given tags.
+      The values are concatenated; delimit tags with `,` to match ANY of them, or with ` + ` (surrounding spaces required) to match ALL of them.
+
+  - name: without
+    in: query
+    collectionFormat: multi
+    type: array
+    items:
+      type: string
+    example: ["unwanted", ".title substring"]
+    description: "Keywords (same syntax as **keywords**) whose matches are excluded from the results."
+
   - name: keywords
     in: query
     required: true

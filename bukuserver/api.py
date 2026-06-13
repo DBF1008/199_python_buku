@@ -302,7 +302,8 @@ class ApiBookmarkSearchView(MethodView):
         if not form.validate():
             return Response.INPUT_NOT_VALID(data={'errors': form.errors})
         with get_bukudb() as bukudb:
-            result = [entity(bookmark, index=True) for bookmark in bukudb.searchdb(**form.data)]
+            result = [entity(bookmark, index=True)
+                      for bookmark in bukudb.search_keywords_and_filter_by_tags(**form.data)]
             current_app.logger.debug('total bookmarks:{}'.format(len(result)))
             return Response.SUCCESS(data={'bookmarks': result})
 
@@ -311,7 +312,7 @@ class ApiBookmarkSearchView(MethodView):
         if not form.validate():
             return Response.INPUT_NOT_VALID(data={'errors': form.errors})
         with get_bukudb() as bukudb:
-            deleted, failed, indices = 0, 0, {x.id for x in bukudb.searchdb(**form.data)}
+            deleted, failed, indices = 0, 0, {x.id for x in bukudb.search_keywords_and_filter_by_tags(**form.data)}
             current_app.logger.debug('total bookmarks:{}'.format(len(indices)))
             for index in sorted(indices, reverse=True):
                 if bukudb.delete_rec(index, retain_order=True):

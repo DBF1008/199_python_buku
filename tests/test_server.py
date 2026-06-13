@@ -288,6 +288,47 @@ def test_api_bookmark_search(client):
     assert_response(rd, Response.SUCCESS, {'bookmarks': []})
 
 
+def test_api_bookmark_search_filters(client):
+    bookmarks = [
+        ('http://google.com', 'Google', ['web', 'search']),
+        ('http://example.com', 'Example', ['web', 'news']),
+        ('http://github.com', 'GitHub', ['code']),
+    ]
+    for index, (url, title, tags) in enumerate(bookmarks, start=1):
+        with mock_fetch(title=title):
+            rd = client.post('/api/bookmarks', json={'url': url, 'tags': tags, 'fetch': True})
+        assert_response(rd, Response.SUCCESS, {'index': index})
+
+    def search_indices(query):
+        rd = client.get('/api/bookmarks/search', query_string=query)
+        assert rd.status_code == Response.SUCCESS.status_code
+        return [b['index'] for b in rd.get_json()['bookmarks']]
+
+    # stag narrows keyword matches down to bookmarks carrying the tag
+    assert search_indices({'keywords': ['com'], 'deep': 'true', 'stag': ['web']}) == [1, 2]
+    # ',' between tags matches ANY of them
+    assert search_indices({'keywords': ['com'], 'deep': 'true', 'stag': ['web,news']}) == [1, 2]
+    # ' + ' between tags requires ALL of them (spaces and '+' must be percent-encoded in the URL)
+    rd = client.get('/api/bookmarks/search', query_string='keywords=com&deep=true&stag=web%20%2B%20news')
+    assert [b['index'] for b in rd.get_json()['bookmarks']] == [2]
+    # without excludes keyword matches
+    assert search_indices({'keywords': ['com'], 'deep': 'true', 'without': ['google']}) == [2, 3]
+    # stag and without combine
+    assert search_indices({'keywords': ['com'], 'deep': 'true', 'stag': ['web'], 'without': ['google']}) == [2]
+    # regex semantics are preserved and still combine with stag
+    assert search_indices({'keywords': ['com'], 'regex': 'true', 'stag': ['web']}) == [1, 2]
+    # empty results keep the compatible response shape
+    rd = client.get('/api/bookmarks/search', query_string={'keywords': ['com'], 'deep': 'true', 'stag': ['missing']})
+    assert_response(rd, Response.SUCCESS, {'bookmarks': []})
+
+    # DELETE honours stag and without the same way (removes only example.com)
+    rd = client.delete('/api/bookmarks/search',
+                       data={'keywords': ['com'], 'deep': 'true', 'stag': ['web'], 'without': ['google']})
+    assert_response(rd, Response.SUCCESS, {'deleted': 1})
+    rd = client.get('/api/bookmarks')
+    assert {b['url'] for b in rd.get_json()['bookmarks']} == {'http://google.com', 'http://github.com'}
+
+
 @pytest.mark.parametrize('env_val, exp_val', [
     ['true', True],
     ['false', False],
