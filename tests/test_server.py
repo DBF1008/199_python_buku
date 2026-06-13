@@ -4,7 +4,7 @@ from http import HTTPStatus
 import pytest
 import flask
 from click.testing import CliRunner
-from buku import FetchResult
+from buku import BukuDb, FetchResult
 from bukuserver import server
 from bukuserver.response import Response
 from bukuserver.server import get_bool_from_env_var
@@ -273,6 +273,71 @@ def test_api_bookmark_range(client):
     assert_response(rd, Response.SUCCESS)
     rd = client.get('/api/bookmarks')
     assert_response(rd, Response.SUCCESS, {'bookmarks': []})
+
+
+def test_api_bookmark_range_sparse_db(client):
+    """Range endpoints must reject ranges that span missing (deleted) IDs."""
+    # Create 5 bookmarks (IDs 1-5)
+    for i in range(1, 6):
+        with mock_fetch(title=f'Title {i}'):
+            rd = client.post('/api/bookmarks', json={'url': f'http://example.com/{i}', 'fetch': True})
+        assert_response(rd, Response.SUCCESS, {'index': i})
+
+    # Directly delete record ID 2 via a separate DB connection (bypassing compactdb),
+    # leaving a gap: IDs 1, 3, 4, 5 exist (max_id=5, but ID 2 is missing).
+    db_file = client.application.config['BUKUSERVER_DB_FILE']
+    gap_db = BukuDb(dbfile=db_file)
+    gap_db.cur.execute('DELETE FROM bookmarks WHERE id = ?', (2,))
+    gap_db.conn.commit()
+    gap_db.close()
+
+    # --- GET: ranges spanning the gap must be rejected ---
+    rd = client.get('/api/bookmarks/1/5')  # full range, gap at 2
+    assert_response(rd, Response.RANGE_NOT_VALID)
+    rd = client.get('/api/bookmarks/1/3')  # partial range, gap at 2
+    assert_response(rd, Response.RANGE_NOT_VALID)
+    rd = client.get('/api/bookmarks/2/5')  # starts at missing ID
+    assert_response(rd, Response.RANGE_NOT_VALID)
+
+    # GET: contiguous sub-ranges must succeed
+    rd = client.get('/api/bookmarks/3/5')
+    assert rd.status_code == Response.SUCCESS.status_code
+    data = rd.get_json()
+    assert set(data['bookmarks'].keys()) == {'3', '4', '5'}
+    rd = client.get('/api/bookmarks/1/1')  # single record
+    assert rd.status_code == Response.SUCCESS.status_code
+
+    # --- PUT: ranges spanning the gap must be rejected ---
+    rd = client.put('/api/bookmarks/1/5', json={
+        '1': {'title': 'one'}, '3': {'title': 'three'},
+        '4': {'title': 'four'}, '5': {'title': 'five'}})
+    assert_response(rd, Response.RANGE_NOT_VALID)
+    rd = client.put('/api/bookmarks/1/3', json={
+        '1': {'title': 'one'}, '3': {'title': 'three'}})
+    assert_response(rd, Response.RANGE_NOT_VALID)
+
+    # PUT: contiguous sub-range must succeed
+    rd = client.put('/api/bookmarks/3/5', json={
+        '3': {'title': 'Three'}, '4': {'title': 'Four'}, '5': {'title': 'Five'}})
+    assert_response(rd, Response.SUCCESS)
+
+    # --- DELETE: ranges spanning the gap must be rejected ---
+    rd = client.delete('/api/bookmarks/1/5')
+    assert_response(rd, Response.RANGE_NOT_VALID)
+    rd = client.delete('/api/bookmarks/1/3')
+    assert_response(rd, Response.RANGE_NOT_VALID)
+
+    # DELETE: contiguous sub-range must succeed
+    rd = client.delete('/api/bookmarks/3/5')
+    assert_response(rd, Response.SUCCESS)
+
+    # Edge case: start_index < 1 must be rejected
+    rd = client.get('/api/bookmarks/0/1')
+    assert_response(rd, Response.RANGE_NOT_VALID)
+    rd = client.put('/api/bookmarks/0/1', json={'1': {'title': 'x'}})
+    assert_response(rd, Response.RANGE_NOT_VALID)
+    rd = client.delete('/api/bookmarks/0/1')
+    assert_response(rd, Response.RANGE_NOT_VALID)
 
 
 def test_api_bookmark_search(client):

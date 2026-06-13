@@ -246,21 +246,41 @@ class ApiBookmarkView(MethodView):
                     Response.from_flag(bukudb.delete_rec(index, retain_order=True)))
 
 
+def _range_not_valid(bukudb, start_index, end_index):
+    """Return a RANGE_NOT_VALID response if the range is invalid, else None.
+
+    A range is invalid when:
+    - start_index < 1 or start_index > end_index
+    - end_index exceeds the highest ID in the database
+    - any ID in [start_index, end_index] does not exist (sparse / gap)
+    """
+    if start_index < 1 or start_index > end_index:
+        return Response.RANGE_NOT_VALID()
+    max_index = bukudb.get_max_id() or 0
+    if end_index > max_index:
+        return Response.RANGE_NOT_VALID()
+    expected = end_index - start_index + 1
+    bukudb.cur.execute(
+        'SELECT COUNT(*) FROM bookmarks WHERE id BETWEEN ? AND ?',
+        (start_index, end_index))
+    if bukudb.cur.fetchone()[0] != expected:
+        return Response.RANGE_NOT_VALID()
+    return None
+
+
 class ApiBookmarkRangeView(MethodView):
     def get(self, start_index: int, end_index: int):
         with get_bukudb() as bukudb:
-            max_index = bukudb.get_max_id() or 0
-            if start_index > end_index or end_index > max_index:
-                return Response.RANGE_NOT_VALID()
+            if (resp := _range_not_valid(bukudb, start_index, end_index)):
+                return resp
             result = {'bookmarks': {index: entity(bukudb.get_rec_by_id(index))
                                     for index in range(start_index, end_index + 1)}}
             return Response.SUCCESS(data=result)
 
     def put(self, start_index: int, end_index: int):
         with get_bukudb() as bukudb:
-            max_index = bukudb.get_max_id() or 0
-            if start_index > end_index or end_index > max_index:
-                return Response.RANGE_NOT_VALID()
+            if (resp := _range_not_valid(bukudb, start_index, end_index)):
+                return resp
             updates = []
             errors = {}
             for index in range(start_index, end_index + 1):
@@ -289,9 +309,8 @@ class ApiBookmarkRangeView(MethodView):
 
     def delete(self, start_index: int, end_index: int):
         with get_bukudb() as bukudb:
-            max_index = bukudb.get_max_id() or 0
-            if start_index > end_index or end_index > max_index:
-                return Response.RANGE_NOT_VALID()
+            if (resp := _range_not_valid(bukudb, start_index, end_index)):
+                return resp
             result_flag = bukudb.delete_rec(None, start_index, end_index, is_range=True, retain_order=True)
             return Response.from_flag(result_flag)
 
