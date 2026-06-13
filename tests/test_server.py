@@ -275,6 +275,73 @@ def test_api_bookmark_range(client):
     assert_response(rd, Response.SUCCESS, {'bookmarks': []})
 
 
+def test_api_bookmark_range_sparse(client):
+    """Range endpoints must stay consistent on a DB with non-contiguous ids (gaps)."""
+    bookmarks = [('http://google.com', 'Google'),
+                 ('http://example.com', 'Example Domain'),
+                 ('http://example.org', 'Example Org')]
+    for index, (url, title) in enumerate(bookmarks, start=1):
+        with mock_fetch(title=title):
+            rd = client.post('/api/bookmarks', json={'url': url, 'fetch': True})
+        assert_response(rd, Response.SUCCESS, {'index': index})
+
+    # Introduce a gap: move record #2 to id 5 -> existing ids become {1, 3, 5}, max_id == 5.
+    db = flask.g.bukudb
+    db.cur.execute('UPDATE bookmarks SET id = ? WHERE id = ?', (5, 2))
+    db.conn.commit()
+
+    def title_of(index):
+        rd = client.get(f'/api/bookmarks/{index}')
+        return rd.status_code, (rd.get_json() or {}).get('title')
+
+    # sanity: the gap really exists
+    assert title_of(2) == (Response.BOOKMARK_NOT_FOUND.status_code, None)
+    assert title_of(4) == (Response.BOOKMARK_NOT_FOUND.status_code, None)
+    assert title_of(5) == (Response.SUCCESS.status_code, 'Example Domain')
+
+    # GET spanning a gap previously raised AttributeError (HTTP 500); now it is rejected.
+    assert_response(client.get('/api/bookmarks/1/5'), Response.RANGE_NOT_VALID)
+
+    # PUT spanning a gap must reject *before* mutating anything (no partial update).
+    rd = client.put('/api/bookmarks/1/5', json={
+        '1': {'title': 'CHANGED'}, '3': {'title': 'CHANGED'}, '5': {'title': 'CHANGED'}})
+    assert_response(rd, Response.RANGE_NOT_VALID)
+    assert title_of(1) == (Response.SUCCESS.status_code, 'Google')  # untouched
+
+    # DELETE spanning a gap must reject without deleting the records that do exist.
+    assert_response(client.delete('/api/bookmarks/1/5'), Response.RANGE_NOT_VALID)
+    assert title_of(1) == (Response.SUCCESS.status_code, 'Google')
+    assert title_of(3) == (Response.SUCCESS.status_code, 'Example Org')
+    assert title_of(5) == (Response.SUCCESS.status_code, 'Example Domain')
+
+    # Ranges that are entirely/partly holes, or reach past the last id, are all rejected.
+    assert_response(client.get('/api/bookmarks/2/4'), Response.RANGE_NOT_VALID)   # all missing
+    assert_response(client.get('/api/bookmarks/1/3'), Response.RANGE_NOT_VALID)   # gap at 2
+    assert_response(client.get('/api/bookmarks/1/99'), Response.RANGE_NOT_VALID)  # end > max_id (no 500)
+    assert_response(client.get('/api/bookmarks/0/1'), Response.RANGE_NOT_VALID)   # start < 1
+
+    # DELETE with start 0 must NOT be treated as "clear the whole DB".
+    assert_response(client.delete('/api/bookmarks/0/3'), Response.RANGE_NOT_VALID)
+    assert title_of(1) == (Response.SUCCESS.status_code, 'Google')  # DB intact
+
+    # Valid, fully-populated ranges (even single ids) still read correctly.
+    assert_response(client.get('/api/bookmarks/1/1'), Response.SUCCESS, {'bookmarks': {
+        '1': {'description': '', 'tags': [], 'title': 'Google', 'url': 'http://google.com'}}})
+    assert_response(client.get('/api/bookmarks/5/5'), Response.SUCCESS, {'bookmarks': {
+        '5': {'description': '', 'tags': [], 'title': 'Example Domain', 'url': 'http://example.com'}}})
+
+    # ...and can still be updated and deleted.
+    rd = client.put('/api/bookmarks/5/5', json={'5': {'title': 'Renamed', 'tags': ['x']}})
+    assert_response(rd, Response.SUCCESS)
+    assert_response(client.get('/api/bookmarks/5/5'), Response.SUCCESS, {'bookmarks': {
+        '5': {'description': '', 'tags': ['x'], 'title': 'Renamed', 'url': 'http://example.com'}}})
+    rd = client.delete('/api/bookmarks/5/5')
+    assert_response(rd, Response.SUCCESS)
+    assert title_of(5) == (Response.BOOKMARK_NOT_FOUND.status_code, None)
+    assert title_of(1) == (Response.SUCCESS.status_code, 'Google')  # neighbours intact
+    assert title_of(3) == (Response.SUCCESS.status_code, 'Example Org')
+
+
 def test_api_bookmark_search(client):
     with mock_fetch(title='Google'):
         rd = client.post('/api/bookmarks', json={'url': 'http://google.com', 'fetch': True})
