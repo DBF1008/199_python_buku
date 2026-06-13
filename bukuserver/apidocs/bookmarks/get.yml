@@ -18,6 +18,16 @@ parameters:
       A field name can be prefixed with `+` or `-` to specify sorting direction for the field (`+` is the default).
     # omitted some valid names that may be confusing for the user
 
+  - name: random
+    in: query
+    type: integer
+    minimum: 0
+    description: |-
+      If set, return a random subset of at most this many bookmarks (selected
+      uniformly at random, then presented in the usual order). `0` returns an
+      empty list; a value larger than the total number of bookmarks returns all
+      of them. Must be a non-negative integer.
+
 responses:
   200:
     description: A list of bookmarks (with indices if **order** was supplied)
@@ -29,3 +39,8 @@ responses:
               type: array
               items:
                 $ref: '#/definitions/Data:BookmarkWithIndex'
+
+  422:
+    description: Invalid request data (e.g. a malformed **random** value)
+    schema:
+      $ref: '#/definitions/Response:InputNotValid'

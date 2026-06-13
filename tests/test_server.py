@@ -288,6 +288,63 @@ def test_api_bookmark_search(client):
     assert_response(rd, Response.SUCCESS, {'bookmarks': []})
 
 
+def test_api_random_empty_db(client):
+    rd = client.get('/api/bookmarks', query_string={'random': 5})
+    assert_response(rd, Response.SUCCESS, {'bookmarks': []})
+    rd = client.get('/api/bookmarks/search', query_string={'keywords': ['x'], 'random': 5})
+    assert_response(rd, Response.SUCCESS, {'bookmarks': []})
+    rd = client.get('/api/bookmarks', query_string={'random': 0})
+    assert_response(rd, Response.SUCCESS, {'bookmarks': []})
+
+
+def test_api_random_sampling(client):
+    n = 5
+    with mock_fetch(title='Google'):
+        for i in range(n):
+            rd = client.post('/api/bookmarks', json={'url': f'http://google.com/{i}', 'fetch': True})
+            assert_response(rd, Response.SUCCESS, {'index': i + 1})
+    full = client.get('/api/bookmarks', query_string={'order': '+index'}).get_json()['bookmarks']
+    assert len(full) == n
+    # fewer than total: exact count, members drawn from full, original order preserved
+    sub = client.get('/api/bookmarks', query_string={'order': '+index', 'random': 3}).get_json()['bookmarks']
+    assert len(sub) == 3
+    assert all(x in full for x in sub)
+    assert [full.index(x) for x in sub] == sorted(full.index(x) for x in sub)
+    # out-of-range count clamps to all records (still ordered)
+    sub_all = client.get('/api/bookmarks', query_string={'order': '+index', 'random': 99}).get_json()['bookmarks']
+    assert sub_all == full
+    # zero -> empty list
+    sub0 = client.get('/api/bookmarks', query_string={'random': 0}).get_json()['bookmarks']
+    assert sub0 == []
+
+
+def test_api_search_random(client):
+    n = 4
+    with mock_fetch(title='Google'):
+        for i in range(n):
+            rd = client.post('/api/bookmarks', json={'url': f'http://google.com/{i}', 'fetch': True})
+            assert_response(rd, Response.SUCCESS, {'index': i + 1})
+    base = {'keywords': ['google'], 'order': '+index'}
+    full = client.get('/api/bookmarks/search', query_string=base).get_json()['bookmarks']
+    assert len(full) == n
+    sub = client.get('/api/bookmarks/search', query_string={**base, 'random': 2}).get_json()['bookmarks']
+    assert len(sub) == 2
+    assert all(x in full for x in sub)
+    assert [full.index(x) for x in sub] == sorted(full.index(x) for x in sub)
+    # out-of-range -> all matches
+    sub_all = client.get('/api/bookmarks/search', query_string={**base, 'random': 50}).get_json()['bookmarks']
+    assert sub_all == full
+
+
+@pytest.mark.parametrize('value', ['-1', 'abc', '1.5', ''])
+def test_api_random_invalid(client, value):
+    error = {'errors': {'random': ['Must be a non-negative integer.']}}
+    rd = client.get('/api/bookmarks', query_string={'random': value})
+    assert_response(rd, Response.INPUT_NOT_VALID, error)
+    rd = client.get('/api/bookmarks/search', query_string={'keywords': ['x'], 'random': value})
+    assert_response(rd, Response.INPUT_NOT_VALID, error)
+
+
 @pytest.mark.parametrize('env_val, exp_val', [
     ['true', True],
     ['false', False],

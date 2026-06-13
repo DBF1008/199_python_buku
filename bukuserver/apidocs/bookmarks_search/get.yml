@@ -55,6 +55,16 @@ parameters:
     example: ["global substring", ".title substring", ":url substring", ">description substring", "#partial,tags:", "#,exact,tags", "*another global substring"]
     description: "A set of terms to search for."
 
+  - name: random
+    in: query
+    type: integer
+    minimum: 0
+    description: |-
+      If set, return a random subset of at most this many matching bookmarks
+      (selected uniformly at random, then presented in the usual order). `0`
+      returns an empty list; a value larger than the number of matches returns
+      all of them. Must be a non-negative integer.
+
 responses:
   200:
     description: A list of bookmarks

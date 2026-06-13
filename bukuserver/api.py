@@ -2,6 +2,7 @@
 # pylint: disable=wrong-import-order, ungrouped-imports
 """Server module."""
 import collections
+import random
 import typing as T
 from contextlib import contextmanager
 
@@ -27,6 +28,41 @@ except ImportError:
 
 
 _parse_bool = lambda x: str(x).lower() == 'true'
+
+
+def parse_random():
+    """Parse/validate the optional ``?random=N`` query parameter.
+
+    Validated before any DB read. Returns ``(count, error_response)`` where
+    ``count`` is ``None`` when the parameter is absent (i.e. no sampling), and
+    ``error_response`` is ``None`` unless the value is not a non-negative integer.
+    """
+    raw = request.args.get('random')
+    if raw is None:
+        return None, None
+    try:
+        count = int(raw)
+        if count < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return None, Response.INPUT_NOT_VALID(
+            data={'errors': {'random': [_('Must be a non-negative integer.')]}})
+    return count, None
+
+
+def pick_random(records, count):
+    """Return up to ``count`` records chosen uniformly at random.
+
+    The relative order of the input list is preserved (the selection is random,
+    the ordering is not), so the subset stays consistent with any ``order`` that
+    produced ``records``. ``count is None`` means no sampling (return all); a
+    ``count`` larger than the result size returns every record.
+    """
+    if count is None:
+        return records
+    count = min(count, len(records))
+    return [records[i] for i in sorted(random.sample(range(len(records)), count))]
+
 
 def entity(bookmark, index=False):
     data = {
@@ -190,9 +226,12 @@ class ApiTagView(MethodView):
 
 class ApiBookmarksView(MethodView):
     def get(self):
+        count, error = parse_random()
+        if error:
+            return error
         with get_bukudb() as bukudb:
             order = request.args.getlist('order')
-            all_bookmarks = bukudb.get_rec_all(order=order)
+            all_bookmarks = pick_random(bukudb.get_rec_all(order=order), count)
             return Response.SUCCESS(data={'bookmarks': [entity(bookmark, index=order)
                                                         for bookmark in all_bookmarks]})
 
@@ -301,8 +340,12 @@ class ApiBookmarkSearchView(MethodView):
         form = ApiBookmarkSearchForm(request.args)
         if not form.validate():
             return Response.INPUT_NOT_VALID(data={'errors': form.errors})
+        count, error = parse_random()
+        if error:
+            return error
         with get_bukudb() as bukudb:
-            result = [entity(bookmark, index=True) for bookmark in bukudb.searchdb(**form.data)]
+            records = pick_random(bukudb.searchdb(**form.data), count)
+            result = [entity(bookmark, index=True) for bookmark in records]
             current_app.logger.debug('total bookmarks:{}'.format(len(result)))
             return Response.SUCCESS(data={'bookmarks': result})
 
