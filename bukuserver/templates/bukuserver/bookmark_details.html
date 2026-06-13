@@ -1,0 +1,12 @@
+{% extends 'admin/model/details.html' %}
+{% import 'bukuserver/lib.html' as buku with context %}
+
+{% block tail %}
+  {{ super() }}
+  {{ buku.set_lang() }}
+  {{ buku.limit_navigation_if_popup() }}
+  {{ buku.brand_dbname() }}
+  {{ buku.details_formatting('.table.searchable') }}
+  <script>$('#fa_filter, .table.searchable a').attr('tabindex', 1)</script>
+  {{ buku.link_saved() }}
+{% endblock %}

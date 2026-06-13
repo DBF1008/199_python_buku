@@ -1,0 +1,24 @@
+{% extends 'admin/model/list.html' %}
+{% import 'bukuserver/lib.html' as buku with context %}
+
+{% block head %}
+  {{ super() }}
+  {{ buku.close_if_popup() }}
+  {{ buku.brand_dbname() }}
+{% endblock %}
+
+{% block model_menu_bar_before_filters %}
+  {{ super() }}
+  <form id="refresh" class="d-none" method="POST" action="refresh"></form>
+  <li class="nav-item">
+    <a class="nav-link" href="#" onclick="refresh.submit()">{{ _('Refresh') }}</a>
+  </li>
+{% endblock %}
+
+{% block tail %}
+  {{ buku.fix_translations('tags') }}
+  {{ super() }}
+  {{ buku.page_size_custom() }}
+  {{ buku.focus(None) }}
+  <script>$('tr:has(a[href$="/bookmark/?flt0_tags_number_equal=0"]) .list-buttons-column').html('')</script>
+{% endblock %}

@@ -1,0 +1,163 @@
+{% macro filter(name, value) %}{{ url_for('bookmark.index_view', **{'flt0_'+name: value}) }}{% endmacro %}
+
+{% macro bookmarklet() -%}
+  {% with url = url_for('bookmarklet', _external=True) -%}
+    {% include 'bukuserver/bookmarklet.url' %}
+  {%- endwith %}
+{%- endmacro %}
+
+{% macro script(filename) %}
+  <script src="{{ url_for('static', filename='bukuserver/js/'+filename) }}"></script>
+{% endmacro %}
+
+{% macro close_if_popup() %}
+  <script>({{ g.popup|default|tojson }} || (opener && (opener !== window))) && close()</script>
+{% endmacro %}
+
+{% macro limit_navigation_if_popup() %}
+  <style>
+    .popup a.navbar-brand {pointer-events: none}
+    .popup #admin-navbar-collapse {display: block}
+    .popup :is(.navbar-nav, .navbar-toggler) {display: none}
+    .popup .nav-tabs :is(:first-child, :nth-child(2)) > .nav-link:not(.active) {display: none}
+  </style>
+  <script>
+    const POPUP = {{ g.popup|default|tojson }} || (opener && (opener !== window)) || '';
+    POPUP && (document.body.classList.add('popup'), setTimeout(() => {
+      $(`.nav-tabs a:not([href^='javascript:'])`).each((_, e) => e.href += `&popup=${POPUP}`);
+      $(`.submit-row .btn-danger`).on('click', () => close());
+      $(`.delete-form`).prepend(`<input type="hidden" name="popup" value="${POPUP}">`);
+    }));
+  </script>
+{% endmacro %}
+
+{% macro brand_dbname(nohover=False) %}
+  <style>
+    .dbname {font-weight: bold;  font-family: monospace;  cursor: help}
+    .navbar-brand .dbname {font-size: medium}
+    body:not(.popup) .navbar-brand {text-align: center}
+    body.popup .navbar-brand .dbname, body:not(.popup) .popup.dbname {display: none}
+    .popup.dbname {float: right;  font-size: smaller;  line-height: 2.2}
+    {% if nohover %}
+    body:not(.popup) .navbar-brand {padding-top: 0;  padding-bottom: 0;  margin-top: -.625rem;  margin-bottom: -.625rem}
+    {% else %}
+    body:not(.popup) .navbar-brand:hover {padding-top: 0;  padding-bottom: 0;  margin-top: -.625rem;  margin-bottom: -.625rem}
+    body:not(.popup) .navbar-brand:not(:hover) .dbname {display: none}
+    {% endif %}
+  </style>
+  <script>{
+    let _dbname = (cls='') => `<div class="dbname ${cls}" title="${ {{dbfile|tojson}} }">${ {{dbname|tojson}} }</div>`;
+    addEventListener('load', () => {$('.navbar-brand').html((_, s) => s + _dbname());
+                                    $('.navbar-collapse').html((_, s) => s + _dbname('popup navbar-brand'))});
+  }</script>
+{% endmacro %}
+
+{% macro focus(location='body') %}
+  {% if location %}
+  <script>setTimeout(() => $('{{location|safe}} input:not([type=hidden])')[0]?.focus(), 500)</script>
+  {% else %}
+  <script>$(document).ready(() => document.activeElement?.blur())</script>
+  {% endif %}
+{% endmacro %}
+
+{% macro fetch_checkbox(checked=True, modal=False) %}
+  <script>{
+    let tooltip = {{ _('Collect missing data (+extra tags) by fetching & parsing the webpage')|tojson }}
+    $('.admin-form [name=fetch]').remove();
+    $('.admin-form fieldset{% if modal %} .modal-footer{% endif %}').{% if modal %}prepend{% else %}append{% endif %}(
+      $(`<div class="form-group {{ 'mb-0' if modal else '' }}"{% if modal %} style="flex-grow: 1"{% endif %} title="${tooltip}">`
+        +`<label class="control-label {{ 'mb-0' if modal else '' }}">{{ _('Fetch') }} &nbsp; </label>`
+        +`<input type="checkbox" name="fetch"{% if checked %} checked{% endif %}></div>`));
+  }</script>
+{% endmacro %}
+
+{% macro horizontal_form(excluding_popups=False) %}
+  <script>
+    $('.admin-form .form-group').each(function () {
+      if ($('.submit-row', this).length > 0{% if excluding_popups %} || document.body.matches('.popup'){% endif %}) {
+        $('.submit-row', this).addClass(document.body.matches('.popup') ? 'col-md-12' : 'offset-md-2');
+      } else if ($('input[type=checkbox], input[type=radio]', this).length > 0) {
+        $('label', this).addClass('form-row').css({cursor: 'pointer'}).html(`<span>${ $('label', this).html() }</span>`);
+        $('label span', this).addClass('col-md-2 col-form-label text-right d-inline-block');
+        $('input', this).appendTo($('label', this));
+      } else {
+        $(this).addClass('form-row');
+        $('input, textarea, select', this).addClass('col-md-10');
+        $('label', this).addClass('col-md-2 col-form-label text-right');
+      }
+    });
+  </script>
+{% endmacro %}
+
+{% macro details_formatting(prefix='') %}
+  <script>
+    $(`.modal-header h3`).wrapInner('<h5 class="modal-title">').children(0).unwrap();  // flask-admin #2505
+    $(`body.popup {{prefix}} a`).attr('target', '_blank');
+  </script>
+{% endmacro %}
+
+{% macro link_saved() %}
+  {% set backlink = request.args.get('url', request.full_path) %}
+  {% set saved = session.pop('saved', None) %}
+  {% if saved %}
+  <script>{
+    const SUCCESS = [{{ _gettext('Record was successfully created.') | tojson }},
+                     {{ _gettext('Record was successfully saved.') | tojson }}];
+    $(`.alert-success`).filter((idx, e) => SUCCESS.some(s => e.innerText.includes(s))).html((_, s) =>
+      s.replace(/(<\/button>)([^]*)$/, `$1<a href="{{ url_for('.details_view', id=saved, url=backlink, popup=g.popup) }}">$2</a>`));
+  }</script>
+  {% endif %}
+{% endmacro %}
+
+{% macro set_lang() %}
+  <script>document.documentElement.lang = {{ lang|tojson }}</script>
+{% endmacro %}
+
+{% macro fix_translations(list) %}  {# invoke in *_list.html BEFORE tail.super()! #}
+  {{ set_lang() }}
+  {% set LISTS = {'tags': {'name': _p('tags', 'name'), 'usage_count': _p('tags', 'usage count')},
+                  'bookmarks': {'id': _p('bookmarks', 'index'), 'url': _p('bookmarks', 'url'), 'title': _p('bookmarks', 'title'),
+                                'tags': _p('bookmarks', 'tags'), 'order': _p('bookmarks', 'order')}} %}
+  <script>{
+    $(`button[title="Delete record"]`).attr('title', {{ _('Delete record')|tojson }});  // see flask-admin issue #1974
+    const FILTERS = {{ LISTS.get(list, {})|tojson }};
+    let watcher = new MutationObserver(xs => xs.forEach(x => x.addedNodes.forEach(e => {
+      if (!['filter-groups-data', 'active-filters-data'].includes(e.id)) return;
+      e.setAttribute('data-initial', e.innerHTML);
+      let data = JSON.parse(e.innerHTML);
+      let converted = (e.id == 'active-filters-data' ? data.map(([id, name, value]) => [id, FILTERS[name]||name, value]) :
+                       Object.fromEntries( Object.entries(data).map(([k, v]) => [FILTERS[k]||k, v]) ));
+      e.innerHTML = JSON.stringify(converted);
+    })));
+    watcher.observe(document.body, {childList: true, subtree: true});
+    setTimeout(() => watcher.disconnect());  // will stop observing once <body> is rendered
+    $(document).ready(() => {
+      $(`.field-filters .filter`).each(function () {
+        let text = $(this).text();
+        $(this).text(FILTERS[text] || text);
+      });
+    })
+  }</script>
+{% endmacro %}
+
+{% macro page_size_custom() %}
+  <script>
+    $(document).ready(function() {
+      let pageSize = url => new URL(url || location.host).searchParams.get('page_size');
+      $(`.nav.nav-tabs .dropdown-menu`).each(function () {
+        let _sizes = $(`a.dropdown-item`, this).map(function () {return pageSize(this.href)}).get();
+        if (_sizes.length > 2 && _sizes.length == new Set(_sizes).size)  // 3+ links; each link has different pagesize
+          $('a', this).last().clone().text({{ _('custom')|tojson }}).removeClass('active').attr('href', `#`).on('click', () => {
+            let page = prompt({{ _('Set custom page size (empty for default)')|tojson }}, pageSize(location) || '');
+            if (Number(page) || (page == "")) {
+              let search = new URL(location).searchParams;
+              (page ? search.set('page_size', page) : search.delete('page_size'));
+              location.search = search;
+            } else if (page != null)
+              alert({{ _('Invalid page size')|tojson }} + `: "${page}"`);
+            return false;
+          }).appendTo(this);
+      })
+    });
+  </script>
+{% endmacro %}

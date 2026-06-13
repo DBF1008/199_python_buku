@@ -1,0 +1,371 @@
+{% extends "bukuserver/home.html" %}
+{% import 'bukuserver/lib.html' as buku with context %}
+
+{% block head %}
+  {{ super() }}
+  {{ buku.close_if_popup() }}
+  <script>{// realtime redrawing "Data created" datetime
+    const UNITS = {day: 60*60*24, hour: 60*60, minute: 60, second: 1};
+    const AGO = {{ {'day': _('{} days ago'), 'hour': _('{} hours ago'), 'minute': _('{} minutes ago'), 'second': _('{} seconds ago')}|tojson }};
+    addEventListener('load', function recalcReltime() {
+      let diff = Date.now()/1000 - created.getAttribute('data-timestamp');
+      let unit = (diff < 5 ? "" : Object.keys(UNITS).find(k => diff >= UNITS[k]));
+      created.innerText = (!unit ? {{ _('just now')|tojson }} : AGO[unit].replace('{}', parseInt(diff/UNITS[unit])));
+      setTimeout(recalcReltime, 1000 * {second: 1, minute: 15, hour: 60, day: 15*60}[unit||'second']);
+    });
+  }</script>
+{% endblock %}
+
+{% block body %}
+<div class="container mb-4">
+  <form class="mb-4" action="{{ url_for('statistic.index') }}" method="POST">
+    {{ _('Data created') }}
+    <span id="created" rel="tooltip" title="{{ datetime }}" data-timestamp={{ datetime.timestamp() }}>{{ datetime_text }}</span>
+    <button type="submit" class="btn btn-secondary btn-sm">{{ _('Refresh')|lower }}</button>
+  </form>
+  <h3>{{ _('Netloc') }}</h3>
+
+  {% if netlocs %}
+  <div class="row">
+    <div class="col-md-6">
+      <canvas id="mostCommonChart" width="500" height="500"></canvas>
+    </div>
+
+    <div class="col-md-6">
+      {% if netlocs.cropped %}
+      <button type="button" class="btn btn-primary btn-sm" data-toggle="modal" data-target="#netlocModal">
+        {{ _('View all') }}
+      </button>
+      {% endif %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>{{ _('Rank') }}</th>
+            <th>{{ _('Netloc') }}</th>
+            <th class="text-right">{{ _('Number') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in netlocs %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td> <a href="{{ buku.filter('url_netloc_match', item.name) }}">{{ item.name or _('(no netloc)') }}</a> </td>
+            <td class="text-right">{{ item.amount }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <span>{{ _('No bookmarks found.') }}</span>
+  {% endif %}
+
+  {% if netlocs.cropped %}
+  <div class="modal fade" id="netlocModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h4 class="modal-title" id="myModalLabel">{{ _('Netloc ranking') }}</h4>
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        </div>
+        <div class="modal-body">
+          <table class="table table-sm">
+            <thead class="thead-dark">
+              <tr>
+                <th>{{ _('Rank') }}</th>
+                <th>{{ _('Netloc') }}</th>
+                <th class="text-right">{{ _('Number') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for name, amount in netlocs.all %}
+              <tr>
+                <td>{{ loop.index }}</td>
+                <td>
+                  <a href="{{ buku.filter('url_netloc_match', name) }}">{{ name or _('(no netloc)') }}</a>
+                </td>
+                <td class="text-right">{{ amount }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <h3 class="col-md-12">{{ _('Tag') }}</h3>
+
+  {% if tags %}
+  <div class="row">
+    <div class="col-md-6">
+      <canvas id="mostCommonTagChart" width="500" height="500"></canvas>
+    </div>
+
+    <div class="col-md-6">
+      {% if tags.cropped %}
+      <button type="button" class="btn btn-primary btn-sm" data-toggle="modal" data-target="#tagRankModal">
+        {{ _('View all') }}
+      </button>
+      {% endif %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>{{ _('Rank') }}</th>
+            <th>{{ _('Tag') }}</th>
+            <th class="text-right">{{ _('Number') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in tags %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td>
+              <a href="{{ buku.filter('tags_contain', item.name) }}">{{ item.name }}</a>
+            </td>
+            <td class="text-right">{{ item.amount }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <span>{{ _('No tags found.') }}</span>
+  {% endif %}
+
+  {% if tags.cropped %}
+  <div class="modal fade" id="tagRankModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h4 class="modal-title" id="myModalLabel">{{ _('Tag ranking') }}</h4>
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        </div>
+        <div class="modal-body">
+          <table class="table table-sm">
+            <thead class="thead-dark">
+              <tr>
+                <th>{{ _('Rank') }}</th>
+                <th>{{ _('Tag') }}</th>
+                <th class="text-right">{{ _('Number') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for name, amount in tags.all %}
+              <tr>
+                <td>{{ loop.index }}</td>
+                <td> <a href="{{ buku.filter('tags_contain', name) }}">{{ name }}</a> </td>
+                <td class="text-right">{{ amount }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <h3 class="col-md-12">{{ _('Title (common)') }}</h3>
+
+  {% if titles %}
+  <div class="row">
+    <div class="col-md-6">
+      <canvas id="mostCommonTitleChart" width="500" height="500"></canvas>
+    </div>
+
+    <div class="col-md-6">
+      {% if titles.cropped %}
+      <button type="button" class="btn btn-primary btn-sm" data-toggle="modal" data-target="#titleModal">
+        {{ _('View all') }}
+      </button>
+      {% endif %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>{{ _('Rank') }}</th>
+            <th>{{ _('Title') }}</th>
+            <th class="text-right">{{ _('Number') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in titles %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td>
+              <a href="{{ buku.filter('title_equals', item.name) }}">{{ item.name or _('(no title)')}}</a>
+            </td>
+            <td class="text-right">{{ item.amount }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <span>{{ _('No common titles found.') }}</span>
+  {% endif %}
+
+  {% if titles.cropped %}
+  <div class="modal fade" id="titleModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h4 class="modal-title" id="myModalLabel">{{ _('Common titles ranking') }}</h4>
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        </div>
+        <div class="modal-body">
+          <table class="table table-sm">
+            <thead class="thead-dark">
+              <tr>
+                <th>{{ _('Rank') }}</th>
+                <th>{{ _('Title') }}</th>
+                <th class="text-right">{{ _('Number') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for name, amount in titles.all %}
+              <tr>
+                <td>{{ loop.index }}</td>
+                <td style="word-break:break-all;">
+                  <a href="{{ buku.filter('title_equals', name) }}">{{ name or _('(no title)') }}</a>
+                </td>
+                <td class="text-right">{{ amount }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+{% endblock %}
+
+{% block tail %}
+  {{ super() }}
+  {{ buku.set_lang() }}
+  <script>// sticky table headers in modals
+    $('.modal-body').each(function () {
+      $('thead', this).css({top: `calc(-${$.css(this, 'padding-top')} - 1px)`});  // +border
+    });
+  </script>
+  {{ buku.script('Chart.js') }}
+  <script>
+  {% set NO_NETLOC = '\u200B' + _('(no netloc)') + '\u200B' -%}
+  var netlocCtx = document.getElementById("mostCommonChart")?.getContext('2d');
+  var netlocChart = netlocCtx && new Chart(netlocCtx, {
+    type: 'pie',
+    data: {
+      datasets: [{
+        data: [
+          {% for val in netlocs %} {{val.amount}}, {% endfor %}
+        ],
+        backgroundColor: [
+          {% for val in netlocs %} {{val.color|tojson}}, {% endfor %}
+        ],
+      }],
+      // These labels appear in the legend and in the tooltips when hovering different arcs
+      labels: [
+        {% for val in netlocs %} {{(val.name or NO_NETLOC)|tojson}}, {% endfor %}
+      ]
+    },
+    options: {
+      onClick (evt, item) {
+        if (!item[0]) return;
+        var value = this.data.labels[item[0]._index].replace({{NO_NETLOC|tojson}}, "");
+        var form = $('<form></form>');
+
+        form.attr("method", "get");
+        form.attr("action", "{{url_for('bookmark.index_view')}}");
+
+        var field = $('<input></input>');
+
+        field.attr("type", "hidden");
+        field.attr("name", "flt0_url_netloc_match");
+        field.attr("value", value);
+        form.append(field);
+
+        // The form needs to be a part of the document in
+        // order for us to be able to submit it.
+        $(document.body).append(form);
+        form.submit();
+      }
+    }
+  });
+
+  var tagRankCtx = document.getElementById("mostCommonTagChart")?.getContext('2d');
+  var tagRankChart = tagRankCtx && new Chart(tagRankCtx, {
+    type: 'pie',
+    data: {
+      datasets: [{
+        data: [
+          {% for val in tags %} {{val.amount}}, {% endfor %}
+        ],
+        backgroundColor: [
+          {% for val in tags %} {{val.color|tojson}}, {% endfor %}
+        ],
+      }],
+      // These labels appear in the legend and in the tooltips when hovering different arcs
+      labels: [
+        {% for val in tags %} {{val.name|tojson}}, {% endfor %}
+      ]
+    },
+    options: {
+      onClick (evt, item) {
+        if (!item[0]) return;
+        var tagStr = this.data.labels[item[0]._index];
+        var url = "{{url_for('bookmark.index_view')}}?flt0_tags_contain=" + encodeURIComponent(tagStr);
+        window.location.href = url;
+      }
+    }
+  });
+
+  {% set NO_TITLE = '\u200B' + _('(no title)') + '\u200B' -%}
+  var titleCtx = document.getElementById("mostCommonTitleChart")?.getContext('2d');
+  var titleChart = titleCtx && new Chart(titleCtx, {
+    type: 'pie',
+    data: {
+      datasets: [{
+        data: [
+          {% for val in titles %} {{val.amount}}, {% endfor %}
+        ],
+        backgroundColor: [
+          {% for val in titles %} {{val.color|tojson}}, {% endfor %}
+        ],
+      }],
+      // These labels appear in the legend and in the tooltips when hovering different arcs
+      labels: [
+        {% for val in titles %} {{(val.name|trim or NO_TITLE)|tojson}}, {% endfor %}
+      ]
+    },
+    options: {
+      onClick (evt, item) {
+        if (!item[0]) return;
+        var value = this.data.labels[item[0]._index].replace({{NO_TITLE|tojson}}, "");
+        var form = $('<form></form>');
+
+        form.attr("method", "get");
+        form.attr("action", "{{url_for('bookmark.index_view')}}");
+
+        var field = $('<input></input>');
+
+        field.attr("type", "hidden");
+        field.attr("name", "flt0_title_equals");
+        field.attr("value", value);
+        form.append(field);
+
+        // The form needs to be a part of the document in
+        // order for us to be able to submit it.
+        $(document.body).append(form);
+        form.submit();
+      }
+    }
+  });
+  </script>
+
+</div>
+{% endblock %}

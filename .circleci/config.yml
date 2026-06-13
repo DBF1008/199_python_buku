@@ -1,0 +1,146 @@
+version: 2.1
+
+executors:
+  docker-publisher:
+    environment:
+      IMAGE_NAME: bukuserver/bukuserver
+    docker:
+      - image: cimg/base:current
+
+test-template: &test-template
+  working_directory: ~/Buku
+  environment:
+    CI_FORCE_TEST: 1
+  steps:
+    - run: &init
+        command: |
+          apt update && apt install -y --no-install-recommends git
+          pip install --upgrade pip
+    - checkout
+    - run: &deps
+        command: |
+          pip install -e . --group dev
+    - run:
+        command:
+          python3 -m pytest ./tests/test_*.py --cov buku -vv --durations=0 -c ./tests/pytest.ini
+
+lint-template: &lint-template
+  working_directory: ~/Buku
+  environment:
+    CI_FORCE_TEST: 1
+  steps:
+    - run: *init
+    - checkout
+    - run: *deps
+    - run:
+        command: |
+          python3 -m flake8
+          echo buku | xargs pylint --rcfile tests/.pylintrc
+          find . -iname "*.py" ! -path "./api/*" | xargs pylint --rcfile tests/.pylintrc
+
+jobs:
+  lint:
+    docker:
+      - image: python:3.13-slim
+    <<: *lint-template
+
+  py310:
+    docker:
+      - image: python:3.10-slim
+    <<: *test-template
+
+  py311:
+    docker:
+      - image: python:3.11-slim
+    <<: *test-template
+
+  py312:
+    docker:
+      - image: python:3.12-slim
+    <<: *test-template
+
+  py313:
+    docker:
+      - image: python:3.13-slim
+    <<: *test-template
+
+  py314:
+    docker:
+      - image: python:3.14-slim
+    <<: *test-template
+
+#  package-and-publish:
+#    machine: true
+#    working_directory: ~/Buku
+#    steps:
+#      - checkout
+#      - run:
+#          name: "package with packagecore"
+#          command: |
+#            # Use latest installed python3 from pyenv
+#            export PYENV_VERSION="$(pyenv versions | grep -Po '\b3\.\d+\.\d+' | tail -1)"
+#            pip install packagecore
+#            packagecore -o ./dist/ ${CIRCLE_TAG#v}
+#      - run:
+#          name: "publish to GitHub"
+#          command: |
+#            go get github.com/tcnksm/ghr
+#            ghr -t ${GITHUB_API_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -replace ${CIRCLE_TAG} ./dist/
+
+  build-and-publish-docker-image:
+    executor: docker-publisher
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run:
+          name: Login to Docker Hub
+          command: 'echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin'
+      - run:
+          name: Create a builder instance
+          command: docker buildx create --use
+      - run:
+          name: Build Docker image and publish it to Docker Hub
+          command: |
+            TAGS="--tag $IMAGE_NAME:latest"
+            [ "$CIRCLE_TAG" ] && TAGS="--tag $IMAGE_NAME:$CIRCLE_TAG $TAGS"
+            docker buildx build --platform=linux/amd64,linux/arm64 $TAGS --push .
+
+workflows:
+  version: 2.1
+
+  CircleCI:
+    jobs: &all-tests
+      - lint
+      - py310
+      - py311
+      - py312
+      - py313
+      - py314
+
+  nightly:
+    triggers:
+      - schedule:
+          cron: "0 0 * * 6"
+          filters:
+            branches:
+              only:
+                - master
+    jobs: *all-tests
+
+#  publish-github-release:
+#    jobs:
+#      - package-and-publish:
+#          filters:
+#            tags:
+#              only: /^v.*/
+#            branches:
+#              ignore: /.*/
+
+  publish-docker-image:
+    jobs:
+      - build-and-publish-docker-image:
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/

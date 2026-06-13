@@ -1,0 +1,91 @@
+{% extends "admin/index.html" %}
+{% import 'bukuserver/lib.html' as buku with context %}
+
+{% block head %}
+  {{ super() }}
+  {{ buku.close_if_popup() }}
+  {{ buku.brand_dbname() }}
+  {{ buku.focus('main form[action="/"]') }}
+{% endblock %}
+
+{% block menu_links %}
+{{ super() }}
+<form class="form-inline navbar-right" style="gap:.275rem" action="{{ url_for('admin.search') }}" method="POST">
+  <div class="d-inline-block align-middle">
+    <input class="form-control" id="inputKeywords" placeholder="{{ _('Search bookmark') }}" name="keyword"/>
+    <input type="hidden" name="markers" value="true"/>
+    <input type="hidden" name="all_keywords" value="true"/>
+  </div>
+  <button type="submit" class="btn btn-secondary">{{ _gettext('Search') }}</button>
+</form>
+{% endblock %}
+
+{% block body %}
+{{ super() }}
+<main class="container text-center p-4">
+    <h1>BUKU</h1>
+    <p class="lead">{{ _('Bookmark manager like a text-based mini-web') }}</p>
+    <p>
+      <a class="btn btn-lg btn-success" href="{{ url_for('bookmark.index_view') }}" role="button">{{ _('Bookmarks') }}</a>
+      <a class="btn btn-lg btn-success" href="{{ url_for('tag.index_view') }}" role="button">{{ _('Tags') }}</a>
+      <a class="btn btn-lg btn-success" href="{{ url_for('statistic.index') }}" role="button">{{ _('Statistic') }}</a>
+    </p>
+    <div class="col-md-4 offset-md-4">
+      <form action="{{ url_for('admin.search') }}" method="POST">
+        <div class="form-group">
+          {{ form.keyword.label }}
+          {{ form.keyword(class_='form-control d-inline', style='width: auto') }}
+        </div>
+        <div class="text-left">
+          {% for field in [form.all_keywords, form.markers, form.deep, form.regex] -%}
+          <div class="form-check" title="{{ field.description }}" data-toggle="tooltip" data-placement="bottom"> {{field()}} {{field.label}} </div>
+          {%- endfor %}
+        </div>
+        <button type="submit" class="btn btn-secondary">{{ _gettext('Search') }}</button>
+      </form>
+    </div>
+    <div class="col-md-4 offset-md-4">
+      <p class="pt-4"> {{_('Bookmarklet')}}:
+        <a title="Drag this link to your bookmarks toolbar" href="{{ buku.bookmarklet() }}">
+          <b>✚ {{ _('Add to Buku') }}</b>
+        </a><br/>
+        <em style="font-size: smaller">{{ _("Note: if you select text on the page before activating the bookmarklet, it'll be used as description instead of page metadata.") }}</em>
+      </p>
+    </div>
+
+    <details class="col-md-6 offset-md-3">
+      <summary style="display: list-item;  cursor: pointer"> <em><strong>{{ _('Location Bar (keyboard-only) shortcut') }}</strong></em> </summary>
+      <dl>
+        <dt>{{ _('in Firefox:') }}</dt>
+        <dd>{{ _('Open the bookmarks editor and set %(buku)s in the Keyword field of the bookmarklet.', buku='<code>@buku</code>'|safe) }}</dd>
+
+        <dt>{{ _('in Chrome:') }}</dt>
+        <dd>
+          {{ _('In %(path)s, add a new row by placing %(add_to_buku)s, %(buku)s, and the copied bookmarklet URL in respective fields).',
+               path='<em>'|safe + _('Settings > Search engine > Manage… > Site Search')|escape + '</em>'|safe,
+               add_to_buku='<code>✚ '|safe + _('Add to Buku') + '</code>'|safe, buku='<code>@buku</code>'|safe) }}
+        </dd>
+
+        <dt>{{ _('usage:') }}</dt>
+        <dd>
+          {{ _("By hitting %(hotkey)s (thus switching to Location Bar), then typing %(buku)s and hitting %(enter)s, you'll be able to open the bookmarklet dialog via keyboard only.",
+               hotkey='<code>Ctrl+L</code>'|safe, buku='<code>@buku</code>'|safe, enter='<code>Enter</code>'|safe) }}
+          <br/><em style="font-size: smaller">{{
+            _('Note: in Firefox this changes displayed URL, but you can reset it by switching back to Location Bar and hitting %(escape)s twice.', escape='<code>Esc</code>'|safe)
+          }}</em>
+        </dd>
+      </dl>
+    </details>
+</main>
+{% endblock %}
+
+{% block tail %}
+  {{ buku.set_lang() }}
+  <script>
+    $(`[data-toggle="tooltip"]`).attr('data-html', 'true').each(function () {
+      this.title = this.title.replace(/'(.*?)'/g, `'<strong><code>$1</code></strong>'`)
+        .replace(/(?<=^|[^\p{L}]){{ _('FULL') }}(?=$|[^\p{L}])/g, `<strong><em>{{ _('FULL')|lower }}</em></strong>`);
+    }).attr('data-container', 'body').attr('data-trigger', 'hover').tooltip();
+  </script>
+  <style>.tooltip-inner {text-align: left;  white-space: pre;  max-width: 600px}</style>
+{% endblock %}
